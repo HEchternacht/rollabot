@@ -88,27 +88,41 @@ For Raspberry Pi with automatic TS client management:
 ini.py              # Main entry point
 src/tsbotrpi/
   ├── bot.py        # Core bot logic (AutoanswerScheduler pattern)
-  ├── cattempts to connect to TeamSpeak ClientQuery
+  ├── commands.py   # Command handlers (edit here to add/modify commands!)
+  ├── config.py     # Environment configuration
+  └── tsclient.py   # TS client process manager
+```
+
+## Adding Commands
+
+Edit [src/tsbotrpi/commands.py](src/tsbotrpi/commands.py) to add or modify bot commands. The `process_command` function receives:
+- `bot`: TS3Bot instance with methods like `masspoke()`, `add_hunted()`, etc.
+- `msg`: The message text
+- `nickname`: The sender's nickname
+
+Example:
+```python
+if msg.startswith("!hello"):
+    return f"Hello {nickname}!"
+```
+
+## How It Works
+
+1. Bot attempts to connect to TeamSpeak ClientQuery
 2. **If connection refused/unavailable**: Automatically starts TS client in new terminal
 3. Registers for text message notifications
 4. Listens for messages and processes commands
 5. On disconnect: automatically reconnects
 6. Uses psutil to find actual TS client PID (searches for 'teamspeak' or 'ts3client' in process list)
-7
-1. Bot connects to TeamSpeak ClientQuery
-2. Registers for text message notifications
-3. Listens for messages and processes commands
-4. On connection refused: restarts TS client (if configured)
-5. On disconnect: automatically reconnects
-6. Sends keepalive every 3 seconds
+7. Sends keepalive every 3 seconds
 
 ## Notes
 
 - Requires TeamSpeak ClientQuery API key
+- Designed for Raspberry Pi but works on any platform
 - **TS client only starts when connection fails** (not on bot startup)
 - Uses `x-terminal-emulator` (or fallback to gnome-terminal, konsole, xterm)
 - Requires `psutil` for proper process tracking
-- Tracks actual TS client PID, not just terminal PIDrm
-- Uses `x-terminal-emulator` for TS client on Linux
+- Tracks actual TS client PID, not just terminal PID
 - Process management handles crashes and restarts
 - Logs to stdout with timestamps

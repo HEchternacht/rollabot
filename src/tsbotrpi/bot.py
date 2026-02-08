@@ -2,6 +2,8 @@ import logging
 import time
 import ts3
 
+from .commands import process_command
+
 logger = logging.getLogger(__name__)
 
 
@@ -119,25 +121,6 @@ class TS3Bot:
         for client in clients:
             self.conn.clientpoke(msg=msg, clid=client["clid"])
 
-    def answer(self, msg, nickname):
-        """Process commands and return response."""
-        if msg.startswith("!mp"):
-            self.masspoke(f"{nickname} te cutucou: {msg[4:]}")
-            return "Poking all clients..."
-        
-        if msg.startswith("!hunted add"):
-            target = msg[12:].strip()
-            return self.add_hunted(target)
-        
-        if msg.startswith("!snapshot"):
-            snapshot = self.conn.clientlist(
-                info=True, country=True, uid=True, ip=True,
-                groups=True, times=True, voice=True, away=True
-            ).parsed
-            return str(snapshot)
-        
-        return f"Unknown command: {msg}"
-
     def run(self):
         """Main event loop."""
         logger.info("Starting bot...")
@@ -157,13 +140,18 @@ class TS3Bot:
                     clid = event.parsed[0].get("invokerid")
                     nickname = event.parsed[0].get("invokername", "")
                     
-                    # Process and respond
-                    response = self.answer(msg, nickname)
-                    self.conn.sendtextmessage(targetmode=1, target=clid, msg=response)
+                    # Ignore messages from x3tBot
+                    if "x3tBot" in nickname or "x3t" in nickname.lower():
+                        logger.debug("Ignoring message from %s", nickname)
+                    else:
+                        # Process and respond
+                        response = process_command(self, msg, nickname)
+                        self.conn.sendtextmessage(targetmode=1, target=clid, msg=response)
             
 
-            except ts3.query.TS3TimeoutError:
+            except ts3.query.TS3TimeoutError as e:
                 # No events, just send keepalive
+                logger.debug("Timeout: %s", e)
                 pass
             
             except Exception as e:
