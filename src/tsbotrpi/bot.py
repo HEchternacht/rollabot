@@ -32,7 +32,7 @@ class TS3Bot:
         if self.server_address:
             try:
                 conn.send(f"connect address={self.server_address} nickname={self.nickname}")
-                logger.info("Connected to server %s as %s", self.server_address, self.nickname)
+                #logger.info("Connected to server %s as %s", self.server_address, self.nickname)
             except Exception as e:
                 # Ignore "already connected" error (id 1796)
                 if "1796" in str(e) or "currently not possible" in str(e).lower():
@@ -176,23 +176,21 @@ class TS3Bot:
 
         try:
             while self._running:
-                # Ensure connection
-                if not self.conn or not self.conn.is_connected():
-                    logger.info("No connection - attempting to connect...")
-                    try:
-                        self.conn = self.setup_connection()
-                        
-                        # Start event thread if not running
-                        if not self._event_thread or not self._event_thread.is_alive():
-                            logger.info("re:Starting event loop thread...")
-                            self._event_thread = threading.Thread(target=self._event_loop, daemon=True)
-                            self._event_thread.start()
-                            logger.info("Event thread started")
-                    except Exception as e:
-                        logger.error("Connection failed: %s", e)
-                        self._reconnect(e)
-                        time.sleep(2)
-                        continue
+               
+                try:
+                    self.conn = self.setup_connection()
+                    
+                    # Start event thread if not running
+                    if not self._event_thread or not self._event_thread.is_alive():
+                        logger.info("re:Starting event loop thread...")
+                        self._event_thread = threading.Thread(target=self._event_loop, daemon=True)
+                        self._event_thread.start()
+                        logger.info("Event thread started")
+                except Exception as e:
+                    logger.error("Connection failed: %s", e)
+                    self._reconnect(e)
+                    time.sleep(2)
+                    continue
                 
                 # Send keepalive and check connection health
                 try:
