@@ -31,7 +31,10 @@ class TS3Bot:
             "111" in err or
             "connection refused" in err or
             "address" in err or
-            "network" in err
+            "network" in err or
+            "name or service not known" in err or
+            "[errno -2]" in err or
+            "nodename nor servname" in err
         )
 
     def _reconnect(self, error=None):
