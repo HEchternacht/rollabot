@@ -7,6 +7,6 @@ requires-python = ">=3.10"
 dependencies = [
 	"python-dotenv",
 	"ts3>=2.0.0b2",
-    "ts3query>=2.0.1",
+	"ts3query>=2.0.1",
+	"psutil>=5.9.0",
 ]
-		

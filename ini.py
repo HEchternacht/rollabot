@@ -33,14 +33,14 @@ def main():
         logger.info("Bot starting...")
         logger.info("Host: %s", config["host"])
         
-        # Setup TS client manager (Raspberry Pi)
+        # Setup TS client manager (only starts on connection refused)
         client_manager = None
         if config["client_command"]:
             client_manager = TSClientManager(
                 command=config["client_command"],
                 pid_file=config["pid_file"]
             )
-            client_manager.start()
+            logger.info("TS client manager configured (will start on connection error)")
         
         # Create and run bot
         bot = TS3Bot(

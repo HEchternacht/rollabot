@@ -23,23 +23,42 @@ class TS3Bot:
         return conn
 
     def _is_connection_refused(self, exc):
-        """Check if error is connection refused."""
+        """Check if error is connection refused or address not found."""
         err = str(exc).lower()
-        return "refused" in err or "10061" in err or "111" in err
+        return (
+            "refused" in err or 
+            "10061" in err or 
+            "111" in err or
+            "connection refused" in err or
+            "address" in err or
+            "network" in err
+        )
 
     def _reconnect(self, error=None):
-        """Reconnect and optionally restart TS client if connection refused."""
-        if error and self._is_connection_refused(error) and self.process_manager:
-            logger.warning("Connection refused - restarting TS client")
-            self.process_manager.restart()
-            time.sleep(2)
-        
+        """Reconnect and start/restart TS client only if connection refused."""
         self.conn = None
+        
+        # Try to connect first
         try:
             self.conn = self.setup_connection()
+            logger.info("Reconnected successfully")
+            return
         except Exception as e:
-            logger.error("Reconnect failed: %s", e)
-            time.sleep(1)
+            logger.error("Connection failed: %s", e)
+            
+            # Only start/restart TS client if connection refused or address not found
+            if self._is_connection_refused(e) and self.process_manager:
+                logger.warning("Connection refused/unavailable - starting TS client")
+                self.process_manager.restart()
+                time.sleep(5)  # Wait for TS client to start
+                
+                # Try connecting again
+                try:
+                    self.conn = self.setup_connection()
+                    logger.info("Connected after starting TS client")
+                except Exception as e2:
+                    logger.error("Still cannot connect: %s", e2)
+                    time.sleep(2)
 
     def get_xbot(self):
         """Find x3tBot Auroria client."""

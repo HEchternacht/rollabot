@@ -4,9 +4,11 @@ TeamSpeak bot for Raspberry Pi with ClientQuery control and automatic TS client 
 
 ## Features
 
+- **Smart client management**: Only starts TS client when connection refused/unavailable
 - **Auto-reconnect**: Automatically reconnects on disconnects
-- **TS client restart**: Restarts TeamSpeak client on connection refused errors
-- **Process management**: Manages TS client process lifecycle with PID tracking
+- **Process tracking**: Uses psutil to track actual TS client PID (not just terminal)
+- **Terminal spawning**: Uses x-terminal-emulator on Raspberry Pi/Linux
+- **Graceful shutdown**: Properly kills both terminal and TS client processes
 - **Command support**:
   - `!mp <message>` - Mass poke all clients
   - `!hunted add <target>` - Add target to x3tBot hunted list
@@ -60,19 +62,25 @@ python main.py
 
 ## Raspberry Pi Setup
 
-For Raspberry Pi with TS client management:
+For Raspberry Pi with automatic TS client management:
 
 1. Set `TS3_CLIENT_COMMAND` in .env:
    ```bash
-   TS3_CLIENT_COMMAND=x-terminal-emulator -e /path/to/teamspeak3-client
+   # Your actual command from .env
+   TS3_CLIENT_COMMAND=sudo box64 /home/pi/Downloads/TeamSpeak3-Client-linux_amd64/ts3client_linux_amd64 --no-sandbox
    ```
 
 2. The bot will:
-   - Start TS client on launch
-   - Track process PID in `.tsclient.pid`
-   - Restart client on connection refused
-   - Kill old process before starting new one
+   - **Only start TS client when needed** (connection refused/unavailable)
+   - Spawn TS client in x-terminal-emulator
+   - Track actual TS client PID using psutil (not just terminal PID)
+   - Kill old processes before starting new ones
    - Cleanup on bot shutdown
+
+3. Install psutil for proper process tracking:
+   ```bash
+   pip install psutil
+   ```
 
 ## Architecture
 
@@ -80,12 +88,13 @@ For Raspberry Pi with TS client management:
 ini.py              # Main entry point
 src/tsbotrpi/
   ├── bot.py        # Core bot logic (AutoanswerScheduler pattern)
-  ├── config.py     # Environment configuration
-  └── tsclient.py   # TS client process manager
-```
-
-## How It Works
-
+  ├── cattempts to connect to TeamSpeak ClientQuery
+2. **If connection refused/unavailable**: Automatically starts TS client in new terminal
+3. Registers for text message notifications
+4. Listens for messages and processes commands
+5. On disconnect: automatically reconnects
+6. Uses psutil to find actual TS client PID (searches for 'teamspeak' or 'ts3client' in process list)
+7
 1. Bot connects to TeamSpeak ClientQuery
 2. Registers for text message notifications
 3. Listens for messages and processes commands
@@ -96,7 +105,10 @@ src/tsbotrpi/
 ## Notes
 
 - Requires TeamSpeak ClientQuery API key
-- Designed for Raspberry Pi but works on any platform
+- **TS client only starts when connection fails** (not on bot startup)
+- Uses `x-terminal-emulator` (or fallback to gnome-terminal, konsole, xterm)
+- Requires `psutil` for proper process tracking
+- Tracks actual TS client PID, not just terminal PIDrm
 - Uses `x-terminal-emulator` for TS client on Linux
 - Process management handles crashes and restarts
 - Logs to stdout with timestamps
