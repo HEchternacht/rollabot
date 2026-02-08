@@ -129,8 +129,9 @@ class TS3Bot:
         logger.info("Event loop thread started")
         
         while self._running:
-            if not self.conn:
-                time.sleep(0.5)
+            if not self.conn or not self.conn.is_connected():
+                time.sleep(1)
+                logger.debug("No connection in event loop, sleeping...")
                 continue
             
             try:
@@ -168,19 +169,25 @@ class TS3Bot:
         """Main event loop."""
         logger.info("Starting bot...")
         self._running = True
-        
+        logger.info("Setting up event loop thread...")
+        self._event_thread=threading.Thread(target=self._event_loop, daemon=True)
+        self._event_thread.start()
+        logger.info("Event thread started")
+
         try:
             while self._running:
                 # Ensure connection
                 if not self.conn or not self.conn.is_connected():
+                    logger.info("No connection - attempting to connect...")
                     try:
                         self.conn = self.setup_connection()
                         
                         # Start event thread if not running
                         if not self._event_thread or not self._event_thread.is_alive():
+                            logger.info("re:Starting event loop thread...")
                             self._event_thread = threading.Thread(target=self._event_loop, daemon=True)
                             self._event_thread.start()
-                    
+                            logger.info("Event thread started")
                     except Exception as e:
                         logger.error("Connection failed: %s", e)
                         self._reconnect(e)
