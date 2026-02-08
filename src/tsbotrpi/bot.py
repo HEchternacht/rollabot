@@ -150,6 +150,7 @@ class TS3Bot:
             
             try:
                 # Wait for events
+                
                 event = self.conn.wait_for_event(timeout=3)
                 if event.parsed:
                     msg = event.parsed[0].get("msg", "")
@@ -161,6 +162,9 @@ class TS3Bot:
                     self.conn.sendtextmessage(targetmode=1, target=clid, msg=response)
             
 
+            except ts3.query.TS3TimeoutError:
+                # No events, just send keepalive
+                pass
             
             except Exception as e:
                 logger.error("Error in event loop: %s", e)
