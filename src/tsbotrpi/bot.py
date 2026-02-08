@@ -128,7 +128,11 @@ class TS3Bot:
         while True:
             # Ensure connection
             #run connect command anyway
-            self.setup_connection()
+            try:
+                self.conn = self.setup_connection()
+            except Exception as e:
+                logger.error("Initial connection failed: %s", e)
+                self._reconnect(e)
             if not self.conn:
                 self._reconnect()
                 continue
