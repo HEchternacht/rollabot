@@ -16,7 +16,7 @@ class TS3Bot:
 
     def setup_connection(self):
         """Setup TS3 ClientQuery connection."""
-        conn = ts3.query.TS3Connection(self.host)
+        conn = ts3.query.TS3ClientConnection(self.host)
         conn.auth(apikey=self.api_key)
         conn.clientnotifyregister(event="notifytextmessage", schandlerid=1)
         logger.info("Connected to %s", self.host)
