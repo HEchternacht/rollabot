@@ -52,8 +52,13 @@ class TS3Bot:
             # Only start/restart TS client if connection refused or address not found
             if self._is_connection_refused(e) and self.process_manager:
                 logger.warning("Connection refused/unavailable - starting TS client")
-                self.process_manager.restart()
-                time.sleep(5)  # Wait for TS client to start
+                restarted = self.process_manager.restart()
+                
+                # Wait longer if we actually restarted (box64 takes ~60s)
+                # Wait less if restart was skipped due to cooldown
+                wait_time = 60 if restarted else 5
+                logger.info("Waiting %ds for TS client...", wait_time)
+                time.sleep(wait_time)
                 
                 # Try connecting again
                 try:

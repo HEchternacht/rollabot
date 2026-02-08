@@ -18,6 +18,7 @@ class TSClientManager:
         self.command = command
         self.pid_file = pid_file
         self.terminal_pid = None
+        self.last_boot_time = None
 
     def _read_pid(self):
         """Read PID from file."""
@@ -133,6 +134,7 @@ class TSClientManager:
         
         if ts_pid:
             self._write_pid(ts_pid)
+            self.last_boot_time = time.time()
             logger.info("TS client started (PID %s)", ts_pid)
 
     def stop(self, timeout=5):
@@ -196,8 +198,20 @@ class TSClientManager:
         self.terminal_pid = None
 
     def restart(self):
-        """Restart TeamSpeak client."""
+        """Restart TeamSpeak client (with 1 minute cooldown).
+        
+        Returns:
+            bool: True if restart was performed, False if skipped due to cooldown
+        """
+        # Check if enough time has passed since last boot (box64 takes ~1 minute)
+        if self.last_boot_time:
+            elapsed = time.time() - self.last_boot_time
+            if elapsed < 60:
+                logger.warning("Skipping restart - only %.1fs since last boot (need 60s)", elapsed)
+                return False
+        
         logger.info("Restarting TS client")
         self.stop()
         time.sleep(2)
         self.start()
+        return True
