@@ -5,7 +5,7 @@ import shlex
 from dataclasses import dataclass
 from typing import List, Optional
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv # type: ignore
 
 
 @dataclass(frozen=True)
