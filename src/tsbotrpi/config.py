@@ -47,6 +47,20 @@ def load_settings() -> Settings:
     if not clientquery_api_key:
         raise ValueError("TS3_CLIENTQUERY_API_KEY is required")
 
+
+    print("Loaded settings:"
+          f"\n  ClientQuery Address: {clientquery_addr}"
+          f"\n  ClientQuery API Key: {'***' if clientquery_api_key else
+                                      '(not set)'}"
+            f"\n  xBot Nickname Contains: {xbot_nickname_contains}"
+            f"\n  Client Command: {client_command if client_command else '(none)'}"
+            f"\n  Client Workdir: {client_workdir if client_workdir else '(none)'}"
+            f"\n  Client PID File: {client_pid_file}"
+            f"\n  Reconnect Delay: {reconnect_delay}s"
+            f"\n  Event Timeout: {event_timeout}s"
+            f"\n  Response Wait Lines: {response_wait_lines}"
+            f"\n  Response Wait Timeout: {response_wait_timeout}s"
+            )
     return Settings(
         clientquery_addr=clientquery_addr,
         clientquery_api_key=clientquery_api_key,
