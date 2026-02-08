@@ -1,5 +1,6 @@
 import logging
 import time
+import threading
 import ts3
 
 from .commands import process_command
@@ -17,6 +18,8 @@ class TS3Bot:
         self.nickname = nickname
         self.process_manager = process_manager
         self.conn = None
+        self._event_thread = None
+        self._running = False
 
     def setup_connection(self):
         """Setup TS3 ClientQuery connection."""
@@ -121,26 +124,19 @@ class TS3Bot:
         for client in clients:
             self.conn.clientpoke(msg=msg, clid=client["clid"])
 
-    def run(self):
-        """Main event loop."""
-        logger.info("Starting bot...")
+    def _event_loop(self):
+        """Event handler thread - listens for messages without timeout."""
+        logger.info("Event loop thread started")
         
-        while True:
-            # Ensure connection
-            #run connect command anyway
-            try:
-                self.conn = self.setup_connection()
-            except Exception as e:
-                logger.error("Initial connection failed: %s", e)
-                self._reconnect(e)
+        while self._running:
             if not self.conn:
-                self._reconnect()
+                time.sleep(0.5)
                 continue
             
             try:
-                # Wait for events
+                # Wait for events (no timeout - blocking call)
+                event = self.conn.wait_for_event()
                 
-                event = self.conn.wait_for_event(timeout=3)
                 if event.parsed:
                     msg = event.parsed[0].get("msg", "")
                     clid = event.parsed[0].get("invokerid")
@@ -151,18 +147,60 @@ class TS3Bot:
                         logger.debug("Ignoring message from %s", nickname)
                     else:
                         # Process and respond
-                        response = process_command(self, msg, nickname)
-                        self.conn.sendtextmessage(targetmode=1, target=clid, msg=response)
+                        try:
+                            response = process_command(self, msg, nickname)
+                            self.conn.sendtextmessage(targetmode=1, target=clid, msg=response)
+                        except Exception as e:
+                            logger.error("Error processing command: %s", e)
             
-
-            except ts3.query.TS3TimeoutError as e:
-                # No events, just send keepalive
-                
+            except ts3.query.TS3TimeoutError:
+                # Should not happen without timeout, but handle anyway
                 pass
             
             except Exception as e:
-                logger.error("Error in event loop: %s", e)
-                self._reconnect(e)
-            self.conn.send_keepalive()
-            time.sleep(1)
+                if self._running:  # Only log if we're supposed to be running
+                    logger.error("Error in event loop: %s", e)
+                time.sleep(1)
+        
+        logger.info("Event loop thread stopped")
+
+    def run(self):
+        """Main event loop."""
+        logger.info("Starting bot...")
+        self._running = True
+        
+        try:
+            while self._running:
+                # Ensure connection
+                if not self.conn or not self.conn.is_connected():
+                    try:
+                        self.conn = self.setup_connection()
+                        
+                        # Start event thread if not running
+                        if not self._event_thread or not self._event_thread.is_alive():
+                            self._event_thread = threading.Thread(target=self._event_loop, daemon=True)
+                            self._event_thread.start()
+                    
+                    except Exception as e:
+                        logger.error("Connection failed: %s", e)
+                        self._reconnect(e)
+                        time.sleep(2)
+                        continue
+                
+                # Send keepalive and check connection health
+                try:
+                    if self.conn and self.conn.is_connected():
+                        self.conn.send_keepalive()
+                except Exception as e:
+                    logger.error("Keepalive failed: %s", e)
+                    self.conn = None
+                
+                time.sleep(3)
+        
+        finally:
+            # Cleanup
+            self._running = False
+            if self._event_thread:
+                self._event_thread.join(timeout=5)
+            logger.info("Bot stopped")
             

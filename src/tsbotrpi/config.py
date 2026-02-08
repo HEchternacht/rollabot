@@ -17,4 +17,5 @@ def load_config():
         "nickname": os.getenv("TS3_NICKNAME", "Rollabot"),
         "client_command": os.getenv("TS3_CLIENT_COMMAND", ""),
         "pid_file": os.getenv("TS3_PID_FILE", ".tsclient.pid"),
+        "debug": os.getenv("DEBUG", "false").lower() in ("true", "1", "yes"),
     }

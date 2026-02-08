@@ -33,6 +33,13 @@ TeamSpeak bot for Raspberry Pi with ClientQuery control and automatic TS client 
    TS3_HOST=127.0.0.1:25639
    TS3_API_KEY=YOUR-API-KEY-HERE
    
+   # Optional - Server connection
+   TS3_SERVER_ADDRESS=#ascendedauroria
+   TS3_NICKNAME=Rollabot
+   
+   # Debug mode
+   DEBUG=false
+   
    # Optional - for Raspberry Pi TS client management
    # Example: x-terminal-emulator -e /opt/teamspeak3-client/ts3client_runscript.sh
    TS3_CLIENT_COMMAND=
@@ -110,11 +117,23 @@ if msg.startswith("!hello"):
 
 1. Bot attempts to connect to TeamSpeak ClientQuery
 2. **If connection refused/unavailable**: Automatically starts TS client in new terminal
-3. Registers for text message notifications
-4. Listens for messages and processes commands
+3. **Event handling thread**: Listens for messages without timeout in separate thread
+4. **Main thread**: Manages connection and sends keepalive every 3 seconds
 5. On disconnect: automatically reconnects
 6. Uses psutil to find actual TS client PID (searches for 'teamspeak' or 'ts3client' in process list)
-7. Sends keepalive every 3 seconds
+
+## Debug Mode
+
+Set `DEBUG=true` in [.env](.env) to enable verbose logging:
+```bash
+DEBUG=true
+```
+
+This will show:
+- All debug messages
+- x3tBot message filtering
+- Connection attempts
+- Thread lifecycle
 
 ## Notes
 

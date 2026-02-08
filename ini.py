@@ -20,18 +20,22 @@ from tsbotrpi.tsclient import TSClientManager
 
 def main():
     """Main entry point."""
+    # Load config first to get debug setting
+    config = load_config()
+    
     # Setup logging
+    log_level = logging.DEBUG if config.get("debug") else logging.INFO
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=log_level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
     logger = logging.getLogger(__name__)
     
     try:
-        # Load config
-        config = load_config()
         logger.info("Bot starting...")
         logger.info("Host: %s", config["host"])
+        if config.get("debug"):
+            logger.info("Debug mode enabled")
         
         # Setup TS client manager (only starts on connection refused)
         client_manager = None
