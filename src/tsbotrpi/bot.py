@@ -25,7 +25,7 @@ class TS3Bot:
         self.settings = settings
         self.process_manager = process_manager
         self.answer_function = answer_function or TS3Bot._answer
-        self.client_conn: Optional[ts3.query.TS3ClientConnection] = None
+        self.client_conn: Optional[ts3.query.TS3Connection] = None
 
     def _is_connection_refused(self, exc: Exception) -> bool:
         text = str(exc).lower()
@@ -37,8 +37,19 @@ class TS3Bot:
         logger.warning("Restarting TS client process")
         self.process_manager.restart()
 
-    def _connect_clientquery(self) -> ts3.query.TS3ClientConnection:
-        conn = ts3.query.TS3ClientConnection(self.settings.clientquery_addr)
+    def _get_client_connection_class(self):
+        conn_class = getattr(ts3.query, "TS3ClientConnection", None)
+        if conn_class is None:
+            conn_class = getattr(ts3.query, "TS3Connection", None)
+        if conn_class is None:
+            raise AttributeError(
+                "ts3.query does not expose a compatible ClientQuery connection class"
+            )
+        return conn_class
+
+    def _connect_clientquery(self) -> ts3.query.TS3Connection:
+        conn_class = self._get_client_connection_class()
+        conn = conn_class(self.settings.clientquery_addr)
         conn.auth(apikey=self.settings.clientquery_api_key)
         conn.clientnotifyregister(event="notifytextmessage", schandlerid=1)
         return conn
@@ -143,8 +154,6 @@ class TS3Bot:
                 pass
             except Exception as exc:
                 logger.error("ClientQuery loop error: %s", exc)
-                if self._is_connection_refused(exc):
-                    self._maybe_restart_tsclient()
                 self.client_conn = None
                 time.sleep(self.settings.reconnect_delay)
             finally:
