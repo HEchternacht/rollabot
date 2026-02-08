@@ -1,0 +1,10 @@
+[project]
+name = "tsbotrpi"
+version = "0.1.0"
+description = "TeamSpeak bot with ClientQuery control"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+	"python-dotenv",
+	"ts3",
+]
