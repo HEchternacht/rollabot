@@ -127,6 +127,8 @@ class TS3Bot:
         
         while True:
             # Ensure connection
+            #run connect command anyway
+            self.setup_connection()
             if not self.conn:
                 self._reconnect()
                 continue
@@ -151,7 +153,7 @@ class TS3Bot:
 
             except ts3.query.TS3TimeoutError as e:
                 # No events, just send keepalive
-                logger.debug("Timeout: %s", e)
+                
                 pass
             
             except Exception as e:
