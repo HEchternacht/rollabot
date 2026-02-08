@@ -13,6 +13,8 @@ def load_config():
     return {
         "host": os.getenv("TS3_HOST", "127.0.0.1:25639"),
         "api_key": api_key,
+        "server_address": os.getenv("TS3_SERVER_ADDRESS", ""),
+        "nickname": os.getenv("TS3_NICKNAME", "Rollabot"),
         "client_command": os.getenv("TS3_CLIENT_COMMAND", ""),
         "pid_file": os.getenv("TS3_PID_FILE", ".tsclient.pid"),
     }

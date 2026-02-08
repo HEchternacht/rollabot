@@ -46,6 +46,8 @@ def main():
         bot = TS3Bot(
             host=config["host"],
             api_key=config["api_key"],
+            server_address=config["server_address"],
+            nickname=config["nickname"],
             process_manager=client_manager
         )
         bot.run()

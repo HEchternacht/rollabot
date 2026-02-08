@@ -8,9 +8,11 @@ logger = logging.getLogger(__name__)
 class TS3Bot:
     """Simplified TeamSpeak bot based on AutoanswerScheduler pattern."""
 
-    def __init__(self, host: str, api_key: str, process_manager=None):
+    def __init__(self, host: str, api_key: str, server_address: str = "", nickname: str = "Rollabot", process_manager=None):
         self.host = host
         self.api_key = api_key
+        self.server_address = server_address
+        self.nickname = nickname
         self.process_manager = process_manager
         self.conn = None
 
@@ -18,8 +20,22 @@ class TS3Bot:
         """Setup TS3 ClientQuery connection."""
         conn = ts3.query.TS3ClientConnection(self.host)
         conn.auth(apikey=self.api_key)
+        conn.use()
         conn.clientnotifyregister(event="notifytextmessage", schandlerid=1)
-        logger.info("Connected to %s", self.host)
+        
+        # Connect to server if address is configured
+        if self.server_address:
+            try:
+                conn.send(f"connect address={self.server_address} nickname={self.nickname}")
+                logger.info("Connected to server %s as %s", self.server_address, self.nickname)
+            except Exception as e:
+                # Ignore "already connected" error (id 1796)
+                if "1796" in str(e) or "currently not possible" in str(e).lower():
+                    logger.debug("Already connected to server")
+                else:
+                    logger.warning("Connect command failed: %s", e)
+        
+        logger.info("Connected to ClientQuery at %s", self.host)
         return conn
 
     def _is_connection_refused(self, exc):
@@ -144,13 +160,11 @@ class TS3Bot:
                     response = self.answer(msg, nickname)
                     self.conn.sendtextmessage(targetmode=1, target=clid, msg=response)
             
-            except ts3.query.TS3TimeoutError:
-                # Normal timeout - send keepalive
-                try:
-                    self.conn.send_keepalive()
-                except:
-                    self._reconnect()
+
             
             except Exception as e:
                 logger.error("Error in event loop: %s", e)
                 self._reconnect(e)
+            self.conn.send_keepalive()
+            time.sleep(1)
+            
