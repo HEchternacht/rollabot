@@ -414,7 +414,16 @@ class TS3Bot:
                 self._check_friendly_guild_exp()
                 
             except Exception as e:
-                logger.error(f"Error in reference data collection: {e}")
+                error_str = str(e).lower()
+                # Check for connection errors
+                if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
+                    logger.warning(f"Reference data collection connection error: {e}")
+                    # Mark connection as broken so main loop reconnects it
+                    self.conn = None
+                    time.sleep(5)
+                else:
+                    logger.error(f"Error in reference data collection: {e}", exc_info=True)
+                    time.sleep(2)
         
         logger.info("Reference data collection thread stopped")
     
@@ -511,7 +520,13 @@ class TS3Bot:
                             poked_count += 1
                             logger.debug(f"Poked {client.get('client_nickname', 'Unknown')} with guild exp update")
                         except Exception as e:
-                            logger.error(f"Failed to poke client {clid}: {e}")
+                            error_str = str(e).lower()
+                            if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
+                                logger.warning(f"Connection error while poking client {clid}: {e}")
+                                self.conn = None
+                                break  # Stop trying if connection is broken
+                            else:
+                                logger.error(f"Failed to poke client {clid}: {e}")
                 
                 if poked_count > 0:
                     logger.info(f"Notified {poked_count} registered users of guild exp gains")
@@ -519,10 +534,15 @@ class TS3Bot:
                     logger.debug("No registered users currently online")
                     
             except Exception as e:
-                logger.error(f"Error sending guild exp notifications: {e}")
+                error_str = str(e).lower()
+                if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
+                    logger.warning(f"Connection error sending guild exp notifications: {e}")
+                    self.conn = None
+                else:
+                    logger.error(f"Error sending guild exp notifications: {e}")
                 
         except requests.RequestException as e:
-            logger.error(f"Failed to fetch guild exp data: {e}")
+            logger.warning(f"Failed to fetch guild exp data: {e}")
         except Exception as e:
             logger.error(f"Error in guild exp check: {e}")
     
@@ -619,7 +639,13 @@ class TS3Bot:
                             poked_count += 1
                             logger.debug(f"Poked {client.get('client_nickname', 'Unknown')} with friendly guild exp update")
                         except Exception as e:
-                            logger.error(f"Failed to poke client {clid}: {e}")
+                            error_str = str(e).lower()
+                            if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
+                                logger.warning(f"Connection error while poking client {clid}: {e}")
+                                self.conn = None
+                                break  # Stop trying if connection is broken
+                            else:
+                                logger.error(f"Failed to poke client {clid}: {e}")
                 
                 if poked_count > 0:
                     logger.info(f"Notified {poked_count} registered users of friendly guild exp gains")
@@ -627,10 +653,15 @@ class TS3Bot:
                     logger.debug("No registered users currently online for friendly guild")
                     
             except Exception as e:
-                logger.error(f"Error sending friendly guild exp notifications: {e}")
+                error_str = str(e).lower()
+                if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
+                    logger.warning(f"Connection error sending friendly guild exp notifications: {e}")
+                    self.conn = None
+                else:
+                    logger.error(f"Error sending friendly guild exp notifications: {e}")
                 
         except requests.RequestException as e:
-            logger.error(f"Failed to fetch friendly guild exp data: {e}")
+            logger.warning(f"Failed to fetch friendly guild exp data: {e}")
         except Exception as e:
             logger.error(f"Error in friendly guild exp check: {e}")
     
@@ -791,8 +822,16 @@ class TS3Bot:
             
             except Exception as e:
                 if self._running:  # Only log if we're supposed to be running
-                    logger.error("Error in event loop: %s", e)
-                time.sleep(1)
+                    error_str = str(e).lower()
+                    # Check for connection errors
+                    if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
+                        logger.warning(f"Event connection error: {e}")
+                        # Mark connection as broken so it gets reconnected
+                        self.event_conn = None
+                        time.sleep(2)
+                    else:
+                        logger.error(f"Error in event loop: {e}", exc_info=True)
+                        time.sleep(1)
         
         logger.info("Event loop thread stopped")
 
@@ -819,16 +858,44 @@ class TS3Bot:
                 try:
                     logger.debug(f"Processing command from {nickname}: {msg[:20]}...")
                     response = process_command(self, msg, nickname)
-                    self.worker_conn.sendtextmessage(targetmode=1, target=clid, msg=response)
-                    logger.debug(f"Sent response to {nickname}")
+                    
+                    # Try to send response with retry logic
+                    max_retries = 2
+                    for attempt in range(max_retries):
+                        try:
+                            self.worker_conn.sendtextmessage(targetmode=1, target=clid, msg=response)
+                            logger.debug(f"Sent response to {nickname}")
+                            break  # Success, exit retry loop
+                        except Exception as send_error:
+                            error_str = str(send_error).lower()
+                            # Check for connection errors
+                            if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
+                                logger.warning(f"Connection error on attempt {attempt + 1}/{max_retries}: {send_error}")
+                                # Mark connection as broken
+                                self.worker_conn = None
+                                
+                                if attempt < max_retries - 1:
+                                    # Wait a bit before retry
+                                    time.sleep(0.5)
+                                    # Connection will be re-established by main loop
+                                    if not self.worker_conn:
+                                        logger.debug("Waiting for worker connection to be re-established...")
+                                        time.sleep(1)
+                                else:
+                                    logger.error(f"Failed to send response after {max_retries} attempts: {send_error}")
+                            else:
+                                # Non-connection error, don't retry
+                                logger.error(f"Error sending message: {send_error}")
+                                break
+                                
                 except Exception as e:
-                    logger.error("Error processing command in worker: %s", e)
+                    logger.error(f"Error processing command in worker: {e}", exc_info=True)
                 finally:
                     self.command_queue.task_done()
                     
             except Exception as e:
                 if self._running:
-                    logger.error("Error in worker loop: %s", e)
+                    logger.error(f"Error in worker loop: {e}", exc_info=True)
                 time.sleep(1)
         
         logger.info("Worker loop thread stopped")
@@ -879,13 +946,13 @@ class TS3Bot:
         try:
             while self._running:
                 # Reconnect main connection if needed
-                if self.conn is None:
+                if self.conn is None or not self.conn.is_connected():
                     try:
                         self.conn = self.setup_connection()
                         logger.info("Main connection re-established")
                     except Exception as e:
-                        self._reconnect(e)
-                        time.sleep(2)
+                        logger.error(f"Failed to reconnect main connection: {e}")
+                        time.sleep(5)
                         continue
                 
                 # Reconnect event connection if needed
@@ -927,10 +994,25 @@ class TS3Bot:
                     # Ensure we're still connected to the server
                     self._ensure_server_connection()
                 except Exception as e:
-                    logger.error("Keepalive failed: %s", e)
-                    self.conn = None
+                    error_str = str(e).lower()
+                    if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
+                        logger.warning(f"Keepalive connection error: {e}")
+                        # Mark connections as broken
+                        self.conn = None
+                        self.event_conn = None
+                    else:
+                        logger.error(f"Keepalive failed: {e}")
+                        self.conn = None
                 
                 time.sleep(3)
+        
+        except KeyboardInterrupt:
+            logger.info("Bot shutdown requested")
+            self._running = False
+        except Exception as e:
+            logger.critical(f"Critical error in main loop: {e}", exc_info=True)
+            logger.info("Bot will attempt to continue...")
+            time.sleep(5)
         
         finally:
             # Cleanup
