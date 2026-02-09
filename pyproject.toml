@@ -9,4 +9,5 @@ dependencies = [
 	"ts3>=2.0.0b2",
 	"ts3query>=2.0.1",
 	"psutil>=5.9.0",
+	"requests>=2.32.5",
 ]

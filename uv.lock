@@ -916,6 +916,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "psutil" },
     { name = "python-dotenv" },
+    { name = "requests" },
     { name = "ts3" },
     { name = "ts3query" },
 ]
@@ -924,6 +925,7 @@ dependencies = [
 requires-dist = [
     { name = "psutil", specifier = ">=5.9.0" },
     { name = "python-dotenv" },
+    { name = "requests", specifier = ">=2.32.5" },
     { name = "ts3", specifier = ">=2.0.0b2" },
     { name = "ts3query", specifier = ">=2.0.1" },
 ]

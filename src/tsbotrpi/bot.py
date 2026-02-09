@@ -1,9 +1,11 @@
 import logging
 import time
 import threading
+import os
 import ts3
 
 from .commands import process_command
+from .activity_logger import ActivityLogger, ClientListLogger
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +22,17 @@ class TS3Bot:
         self.conn = None
         self._event_thread = None
         self._running = False
+        self.client_map = {}  # Maps clid -> {nickname, uid, ip}
+        self.activity_logger = None
+        self.clients_logger_initialized = False
 
     def setup_connection(self):
         """Setup TS3 ClientQuery connection."""
         conn = ts3.query.TS3ClientConnection(self.host)
         conn.auth(apikey=self.api_key)
         conn.use()
-        conn.clientnotifyregister(event="notifytextmessage", schandlerid=1)
+        # Register for ALL notifications, not just text messages
+        conn.clientnotifyregister(schandlerid=1)
         
         # Connect to server if address is configured
         if self.server_address:
@@ -41,6 +47,23 @@ class TS3Bot:
                     logger.warning("Connect command failed: %s", e)
         
         logger.info("Connected to ClientQuery at %s", self.host)
+        
+        # Initialize activity logger on first successful connection
+        if not self.activity_logger:
+            try:
+                log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                activity_log_path = os.path.join(log_dir, 'activities_log.csv')
+                self.activity_logger = ActivityLogger(activity_log_path)
+                self.activity_logger.cleanup_old_entries(days=30)
+                logger.info("Activity logger initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize activity logger: {e}")
+        
+        # Fetch and log current client list on startup
+        if not self.clients_logger_initialized:
+            self._fetch_and_log_clientlist(conn)
+            self.clients_logger_initialized = True
+        
         return conn
 
     def _is_connection_refused(self, exc):
@@ -123,9 +146,125 @@ class TS3Bot:
         clients = self.conn.clientlist().parsed
         for client in clients:
             self.conn.clientpoke(msg=msg, clid=client["clid"])
+    
+    def _fetch_and_log_clientlist(self, conn):
+        """Fetch current client list and log to CSV, update client_map."""
+        try:
+            result = conn.clientlist()
+            if not result.parsed:
+                logger.warning("Empty client list returned")
+                return
+            
+            clients = []
+            for client in result.parsed:
+                clid = client.get('clid', '')
+                nickname = client.get('client_nickname', '')
+                uid = client.get('client_unique_identifier', '')
+                ip = client.get('connection_client_ip', '')
+                
+                # Update client map
+                self.client_map[clid] = {
+                    'nickname': nickname,
+                    'uid': uid,
+                    'ip': ip
+                }
+                
+                clients.append({
+                    'clid': clid,
+                    'nickname': nickname,
+                    'uid': uid,
+                    'ip': ip
+                })
+            
+            # Log to clients_log.csv
+            log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            clients_log_path = os.path.join(log_dir, 'clients_log.csv')
+            ClientListLogger.log_clients(clients_log_path, clients)
+            
+            logger.info(f"Fetched and logged {len(clients)} clients")
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch/log client list: {e}")
+    
+    def _update_client_map(self, clid: str, data: dict):
+        """Update client map with new data."""
+        try:
+            if clid not in self.client_map:
+                self.client_map[clid] = {'nickname': '', 'uid': '', 'ip': ''}
+            
+            # Update available fields
+            if 'client_nickname' in data:
+                self.client_map[clid]['nickname'] = data['client_nickname']
+            if 'client_unique_identifier' in data:
+                self.client_map[clid]['uid'] = data['client_unique_identifier']
+            if 'connection_client_ip' in data:
+                self.client_map[clid]['ip'] = data['connection_client_ip']
+                
+        except Exception as e:
+            logger.error(f"Error updating client map: {e}")
+    
+    def _get_client_info(self, clid: str) -> dict:
+        """Get client info from map, return empty dict if not found."""
+        return self.client_map.get(clid, {'nickname': '', 'uid': '', 'ip': ''})
+    
+    def _log_activity(self, event_type: str, clid: str, details: dict):
+        """Log activity to CSV."""
+        try:
+            if not self.activity_logger:
+                return
+            
+            client_info = self._get_client_info(clid)
+            self.activity_logger.log_event(event_type, clid, client_info, details)
+            
+        except Exception as e:
+            logger.error(f"Error logging activity: {e}")
+    
+    def _handle_event(self, event_type: str, event_data: dict):
+        """Route events to appropriate handlers."""
+        try:
+            # Extract clid from event data
+            clid = event_data.get('clid', '')
+            
+            # Handle different event types
+            if event_type == 'notifycliententerview':
+                # Client connected
+                self._update_client_map(clid, event_data)
+                self._log_activity('cliententerview', clid, event_data)
+                logger.debug(f"Client entered: {event_data.get('client_nickname', 'unknown')}")
+                
+            elif event_type == 'notifyclientleftview':
+                # Client disconnected
+                self._log_activity('clientleftview', clid, event_data)
+                logger.debug(f"Client left: clid={clid}")
+                # Don't remove from map - keep for historical reference
+                
+            elif event_type == 'notifyclientmoved':
+                # Client moved channels
+                self._log_activity('clientmoved', clid, event_data)
+                logger.debug(f"Client moved: clid={clid} from {event_data.get('cfid')} to {event_data.get('ctid')}")
+                
+            elif event_type == 'notifyclientupdated':
+                # Client updated - only log if nickname or mute status changed
+                if any(key in event_data for key in ['client_nickname', 'client_input_muted', 'client_output_muted']):
+                    old_nickname = self.client_map.get(clid, {}).get('nickname', '')
+                    self._update_client_map(clid, event_data)
+                    
+                    # Add old nickname to details for comparison
+                    if 'client_nickname' in event_data:
+                        event_data['old_nickname'] = old_nickname
+                    
+                    self._log_activity('clientupdated', clid, event_data)
+                    logger.debug(f"Client updated: clid={clid}")
+                
+            # Ignore channel edits and other events
+            elif event_type in ['notifychanneledited', 'notifychanneldescriptionchanged']:
+                pass  # Explicitly ignore
+                
+        except Exception as e:
+            logger.error(f"Error handling event {event_type}: {e}")
 
     def _event_loop(self):
-        """Event handler thread - listens for messages without timeout."""
+        """Event handler thread - listens for all events without timeout."""
         logger.info("Event loop thread started")
         
         while self._running:
@@ -138,21 +277,38 @@ class TS3Bot:
                 # Wait for events (no timeout - blocking call)
                 event = self.conn.wait_for_event()
                 
-                if event.parsed:
-                    msg = event.parsed[0].get("msg", "")
-                    clid = event.parsed[0].get("invokerid")
-                    nickname = event.parsed[0].get("invokername", "")
+                if event.parsed and event._data and len(event._data) > 0:
+                    # Extract event type from raw data
+                    try:
+                        event_type = event._data[0].decode("utf-8").split()[0]
+                    except (AttributeError, IndexError, UnicodeDecodeError) as e:
+                        logger.error(f"Failed to extract event type: {e}")
+                        continue
                     
-                    # Ignore messages from x3tBot
-                    if "x3tBot" in nickname or "x3t" in nickname.lower():
-                        logger.debug("Ignoring message from %s", nickname)
+                    event_data = event.parsed[0] if event.parsed else {}
+                    
+                    # Only process commands for text messages
+                    if event_type == "notifytextmessage":
+                        msg = event_data.get("msg", "")
+                        clid = event_data.get("invokerid")
+                        nickname = event_data.get("invokername", "")
+                        
+                        # Ignore messages from x3tBot
+                        if "x3tBot" in nickname or "x3t" in nickname.lower():
+                            logger.debug("Ignoring message from %s", nickname)
+                        else:
+                            # Process and respond
+                            try:
+                                response = process_command(self, msg, nickname)
+                                self.conn.sendtextmessage(targetmode=1, target=clid, msg=response)
+                            except Exception as e:
+                                logger.error("Error processing command: %s", e)
                     else:
-                        # Process and respond
+                        # Route all other events to activity logger
                         try:
-                            response = process_command(self, msg, nickname)
-                            self.conn.sendtextmessage(targetmode=1, target=clid, msg=response)
+                            self._handle_event(event_type, event_data)
                         except Exception as e:
-                            logger.error("Error processing command: %s", e)
+                            logger.error(f"Error handling event {event_type}: {e}")
             
             except ts3.query.TS3TimeoutError:
                 # Should not happen without timeout, but handle anyway
@@ -207,5 +363,10 @@ class TS3Bot:
             self._running = False
             if self._event_thread:
                 self._event_thread.join(timeout=5)
+            if self.activity_logger:
+                try:
+                    self.activity_logger.close()
+                except Exception as e:
+                    logger.error(f"Error closing activity logger: {e}")
             logger.info("Bot stopped")
             
