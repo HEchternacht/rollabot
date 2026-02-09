@@ -589,53 +589,53 @@ class TS3Bot:
             
             try:
                 # Wait for events (no timeout - blocking call)
-                event = self.conn.wait_for_event()
-                
-                if event.parsed and event._data and len(event._data) > 0:
-                    # Extract event type from raw data
-                    try:
-                        event_type = event._data[0].decode("utf-8").split()[0]
-                    except (AttributeError, IndexError, UnicodeDecodeError) as e:
-                        logger.error(f"Failed to extract event type: {e}")
-                        continue
-                    
-                    event_data = event.parsed[0] if event.parsed else {}
-                    
-                    # Check for duplicate events within 1 second
-                    current_time = time.time()
-                    event_signature = (event_type, str(event_data))
-                    
-                    if (self.last_event == event_signature and 
-                        current_time - self.last_event_timestamp < 1.0):
-                        logger.debug(f"Ignoring duplicate event: {event_type}")
-                        continue
-                    
-                    # Update last event tracking
-                    self.last_event = event_signature
-                    self.last_event_timestamp = current_time
-                    
-                    # Only process commands for text messages
-                    if event_type == "notifytextmessage":
-                        msg = event_data.get("msg", "")
-                        clid = event_data.get("invokerid")
-                        nickname = event_data.get("invokername", "")
-                        
-                        # Ignore messages from x3tBot and from the bot itself
-                        if "x3tBot" in nickname or "x3t" in nickname.lower() or nickname == self.nickname:
-                            logger.debug("Ignoring message from %s", nickname)
-                        else:
-                            # Process and respond
-                            try:
-                                response = process_command(self, msg, nickname)
-                                self.conn.sendtextmessage(targetmode=1, target=clid, msg=response)
-                            except Exception as e:
-                                logger.error("Error processing command: %s", e)
-                    else:
-                        # Route all other events to activity logger
+                events = self.conn.wait_for_event()
+                for event in events:
+                    if event.parsed and event._data and len(event._data) > 0:
+                        # Extract event type from raw data
                         try:
-                            self._handle_event(event_type, event_data)
-                        except Exception as e:
-                            logger.error(f"Error handling event {event_type}: {e}")
+                            event_type = event._data[0].decode("utf-8").split()[0]
+                        except (AttributeError, IndexError, UnicodeDecodeError) as e:
+                            logger.error(f"Failed to extract event type: {e}")
+                            continue
+                        
+                        event_data = event.parsed[0] if event.parsed else {}
+                        
+                        # Check for duplicate events within 1 second
+                        current_time = time.time()
+                        event_signature = (event_type, str(event_data))
+                        
+                        if (self.last_event == event_signature and 
+                            current_time - self.last_event_timestamp < 1.0):
+                            logger.debug(f"Ignoring duplicate event: {event_type}")
+                            continue
+                        
+                        # Update last event tracking
+                        self.last_event = event_signature
+                        self.last_event_timestamp = current_time
+                        
+                        # Only process commands for text messages
+                        if event_type == "notifytextmessage":
+                            msg = event_data.get("msg", "")
+                            clid = event_data.get("invokerid")
+                            nickname = event_data.get("invokername", "")
+                            
+                            # Ignore messages from x3tBot and from the bot itself
+                            if "x3tBot" in nickname or "x3t" in nickname.lower() or nickname == self.nickname:
+                                logger.debug("Ignoring message from %s", nickname)
+                            else:
+                                # Process and respond
+                                try:
+                                    response = process_command(self, msg, nickname)
+                                    self.conn.sendtextmessage(targetmode=1, target=clid, msg=response)
+                                except Exception as e:
+                                    logger.error("Error processing command: %s", e)
+                        else:
+                            # Route all other events to activity logger
+                            try:
+                                self._handle_event(event_type, event_data)
+                            except Exception as e:
+                                logger.error(f"Error handling event {event_type}: {e}")
             
             except ts3.query.TS3TimeoutError:
                 # Should not happen without timeout, but handle anyway
