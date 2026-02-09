@@ -37,7 +37,6 @@ class TS3Bot:
         self._worker_thread = None
         self._running = False
         self.command_queue = Queue()  # FIFO queue for ALL operations (commands, reference updates, pokes)
-        self.conn_lock = threading.Lock()  # Serialize access to main connection
         self.client_map = {}  # Maps clid -> {nickname, uid, ip}
         self.activity_logger = None
         self.clients_logger_initialized = False
@@ -350,14 +349,14 @@ class TS3Bot:
             logger.error(f"Failed to fetch/update channel list: {e}")
     
     def _reference_data_loop(self):
-        """Thread that queues reference data tasks every minute."""
+        """Thread that queues reference data tasks every 3 minutes."""
         logger.info("Reference data collection thread started")
         
         i = 0
         while self._running:
-            time.sleep(60)  # Wait 1 minute
+            time.sleep(180)  # Wait 3 minutes
             
-            if i % 10 == 0:
+            if i % 5 == 0:
                 i = 0
                 # Queue reference data update
                 self.command_queue.put({'type': 'reference_update'})
@@ -873,7 +872,7 @@ class TS3Bot:
                             nickname = event_data.get("invokername", "")
                             
                             # Ignore messages from x3tBot and from the bot itself
-                            if "x3tBot" in nickname or "x3t" in nickname.lower() or nickname == self.nickname:
+                            if "x3tBot" in nickname or "x3t" in nickname.lower() or self.nickname in nickname :
                                 logger.debug("Ignoring message from %s", nickname)
                             else:
                                 # Enqueue command for worker thread to process
@@ -936,30 +935,27 @@ class TS3Bot:
                         msg, clid, nickname = item
                         logger.debug(f"Processing command from {nickname}: {msg[:20]}...")
                         
-                        with self.conn_lock:
-                            response = process_command(self, msg, nickname)
-                            try:
-                                self.conn.sendtextmessage(targetmode=1, target=clid, msg=response)
-                                logger.debug(f"Sent response to {nickname}")
-                            except Exception as send_error:
-                                error_str = str(send_error).lower()
-                                if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
-                                    logger.warning(f"Connection error sending response: {send_error}")
-                                    self.conn = None
-                                else:
-                                    logger.error(f"Error sending message: {send_error}")
+                        response = process_command(self, msg, nickname)
+                        try:
+                            self.conn.sendtextmessage(targetmode=1, target=clid, msg=response)
+                            logger.debug(f"Sent response to {nickname}")
+                        except Exception as send_error:
+                            error_str = str(send_error).lower()
+                            if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
+                                logger.warning(f"Connection error sending response: {send_error}")
+                                self.conn = None
+                            else:
+                                logger.error(f"Error sending message: {send_error}")
                     
                     elif isinstance(item, dict) and item.get('type') == 'reference_update':
                         # Reference data update request
                         logger.debug("Processing reference data update")
-                        with self.conn_lock:
-                            self._do_reference_update()
+                        self._do_reference_update()
                     
                     elif isinstance(item, dict) and item.get('type') == 'send_pokes':
                         # Send pending pokes request
                         logger.debug("Processing pending pokes")
-                        with self.conn_lock:
-                            self._do_send_pokes()
+                        self._do_send_pokes()
                     
                     elif isinstance(item, dict) and item.get('type') == 'guild_exp_check':
                         # Guild exp check request
@@ -1066,7 +1062,7 @@ class TS3Bot:
                         logger.error(f"Keepalive failed: {e}")
                         self.conn = None
                 
-                time.sleep(60)
+                time.sleep(120)
         
         except KeyboardInterrupt:
             logger.info("Bot shutdown requested")
