@@ -32,7 +32,7 @@ class TS3Bot:
         conn.auth(apikey=self.api_key)
         conn.use()
         # Register for ALL notifications, not just text messages
-        conn.clientnotifyregister(schandlerid=1)
+        conn.clientnotifyregister(event="any", schandlerid=1)
         
         # Connect to server if address is configured
         if self.server_address:
