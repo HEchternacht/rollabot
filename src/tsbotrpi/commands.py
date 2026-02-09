@@ -20,9 +20,9 @@ def get_txt():
         return None
 
 
-def search_activity_log(search_term: str, max_results: int = 10):
+def search_activity_log(search_term: str, max_results: int = 15):
     """
-    Search activity log for entries matching uid, nickname, or ip.
+    Search human-readable activity log for entries matching uid, nickname, or ip.
     
     Args:
         search_term: The uid, nickname, or ip to search for
@@ -32,22 +32,47 @@ def search_activity_log(search_term: str, max_results: int = 10):
         str: Formatted results or error message
     """
     try:
-        # Get log file path (in project root)
+        # Get log file paths (in project root)
         log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        log_path = os.path.join(log_dir, 'activities_log.csv')
+        readable_log_path = os.path.join(log_dir, 'activity_log_readable.csv')
+        users_seen_path = os.path.join(log_dir, 'users_seen.csv')
         
-        if not os.path.exists(log_path):
+        if not os.path.exists(readable_log_path):
             return "Activity log not found. No events have been logged yet."
         
+        # First, try to find UID from nickname or IP in users_seen.csv
+        target_uids = set()
+        matched_user_info = {}  # uid -> (nickname, ip)
+        
+        if os.path.exists(users_seen_path):
+            with open(users_seen_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    uid = row.get('UID', '')
+                    nickname = row.get('NICKNAME', '')
+                    ip = row.get('IP', '')
+                    
+                    # Check if search term matches UID, nickname, or IP
+                    if (search_term.lower() in uid.lower() or
+                        search_term.lower() in nickname.lower() or
+                        search_term in ip):
+                        target_uids.add(uid)
+                        matched_user_info[uid] = (nickname, ip)
+        else:
+            # If users_seen.csv doesn't exist, assume search_term is a UID
+            target_uids.add(search_term)
+        
+        if not target_uids:
+            return f"No user found matching: {search_term}"
+        
+        # Now search the readable activity log for these UIDs
         matches = []
-        with open(log_path, 'r', newline='', encoding='utf-8') as f:
+        with open(readable_log_path, 'r', newline='', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             
             for row in reader:
-                # Case-insensitive search in nickname, uid, or ip
-                if (search_term.lower() in row.get('nickname', '').lower() or
-                    search_term.lower() in row.get('uid', '').lower() or
-                    search_term in row.get('ip', '')):
+                uid = row.get('UID', '')
+                if uid in target_uids:
                     matches.append(row)
                     
                     if len(matches) >= max_results:
@@ -57,16 +82,22 @@ def search_activity_log(search_term: str, max_results: int = 10):
             return f"No activity found for: {search_term}"
         
         # Format results
-        result = f"Found {len(matches)} activities for '{search_term}':\\n"
+        user_display = search_term
+        if len(target_uids) == 1:
+            uid = list(target_uids)[0]
+            if uid in matched_user_info:
+                nickname, ip = matched_user_info[uid]
+                user_display = f"{nickname} ({uid[:8]}...)"
+        
+        result = f"Found {len(matches)} activities for '{user_display}':\\n"
         for i, match in enumerate(matches, 1):
-            timestamp = match.get('timestamp', '')[:19]  # Truncate microseconds
-            event_type = match.get('event_type', 'unknown')
-            nickname = match.get('nickname', 'N/A')
-            details = match.get('details', '')[:100]  # Limit details length
+            timestamp = match.get('TIMESTAMP', '')
+            event = match.get('EVENT', 'unknown event')
             
-            result += f"{i}. [{timestamp}] {event_type} - {nickname}\\n"
-            if details:
-                result += f"   Details: {details}\\n"
+            result += f"{i}. [{timestamp}] {event}\\n"
+        
+        if len(matches) == max_results:
+            result += f"\\n(Showing first {max_results} results)"
         
         return result
         
