@@ -385,12 +385,19 @@ def process_command(bot, msg, nickname):
     
     # Register for guild exp notifications
     if msg.startswith("!registerexp"):
-        # Get user UID from reference data first, fallback to live data
+        # Get user UID from reference data (avoid API calls from event loop)
         try:
             user_uid = None
             
-            # Try to find in reference data first
-            if hasattr(bot, 'reference_manager') and bot.reference_manager:
+            # Use reference manager's client_map if available
+            if hasattr(bot, 'client_map') and bot.client_map:
+                for clid, client_info in bot.client_map.items():
+                    if client_info.get('nickname', '').lower() == nickname.lower():
+                        user_uid = client_info.get('uid', '')
+                        break
+            
+            # Fallback: Read from CSV if not in memory
+            if not user_uid:
                 try:
                     log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
                     clients_ref_path = os.path.join(log_dir, 'clients_reference.csv')
@@ -405,30 +412,29 @@ def process_command(bot, msg, nickname):
                 except Exception as ref_error:
                     logger.debug(f"Could not read reference data: {ref_error}")
             
-            # Fallback to live clientlist if not found in reference
-            if not user_uid:
-                clid = bot.conn.clientlist().parsed
-                for client in clid:
-                    if client.get('client_nickname', '').lower() == nickname.lower():
-                        user_uid = client.get('client_unique_identifier', '')
-                        break
-            
             if user_uid:
                 return register_exp_user(user_uid)
             else:
-                return "Could not find your UID. Please try again."
+                return "Could not find your UID. Please wait a minute for data to refresh and try again."
         except Exception as e:
             logger.error(f"Error in registerexp command: {e}")
             return "Error registering. Please try again."
     
     # Unregister from guild exp notifications
     if msg.startswith("!unregisterexp"):
-        # Get user UID from reference data first, fallback to live data
+        # Get user UID from reference data (avoid API calls from event loop)
         try:
             user_uid = None
             
-            # Try to find in reference data first
-            if hasattr(bot, 'reference_manager') and bot.reference_manager:
+            # Use reference manager's client_map if available
+            if hasattr(bot, 'client_map') and bot.client_map:
+                for clid, client_info in bot.client_map.items():
+                    if client_info.get('nickname', '').lower() == nickname.lower():
+                        user_uid = client_info.get('uid', '')
+                        break
+            
+            # Fallback: Read from CSV if not in memory
+            if not user_uid:
                 try:
                     log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
                     clients_ref_path = os.path.join(log_dir, 'clients_reference.csv')
@@ -443,18 +449,10 @@ def process_command(bot, msg, nickname):
                 except Exception as ref_error:
                     logger.debug(f"Could not read reference data: {ref_error}")
             
-            # Fallback to live clientlist if not found in reference
-            if not user_uid:
-                clid = bot.conn.clientlist().parsed
-                for client in clid:
-                    if client.get('client_nickname', '').lower() == nickname.lower():
-                        user_uid = client.get('client_unique_identifier', '')
-                        break
-            
             if user_uid:
                 return unregister_exp_user(user_uid)
             else:
-                return "Could not find your UID. Please try again."
+                return "Could not find your UID. Please wait a minute for data to refresh and try again."
         except Exception as e:
             logger.error(f"Error in unregisterexp command: {e}")
             return "Error unregistering. Please try again."
