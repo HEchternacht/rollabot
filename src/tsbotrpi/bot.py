@@ -48,8 +48,10 @@ class TS3Bot:
         self.server_address = server_address
         self.nickname = nickname
         self.process_manager = process_manager
-        self.conn = None  # Main connection - all operations serialized through worker queue
+        self.conn = None  # Main connection - keepalive and general operations
         self.event_conn = None  # Dedicated connection for event loop only
+        self.worker_conn = None  # Dedicated connection for worker thread (command responses)
+        self.reference_conn = None  # Dedicated connection for reference data updates
         self._event_thread = None
         self._reference_thread = None
         self._worker_thread = None
@@ -188,6 +190,40 @@ class TS3Bot:
         conn.clientnotifyregister(event="notifyclientmoved", schandlerid=1)
         conn.clientnotifyregister(event="notifyclientupdated", schandlerid=1)
         conn.clientnotifyregister(event="notifytextmessage", schandlerid=1)
+        
+        # Connect to server if address is configured
+        if self.server_address:
+            try:
+                conn.send(f"connect address={self.server_address} nickname={self.nickname}")
+            except Exception as e:
+                # Ignore "already connected" error
+                pass
+        
+        return conn
+
+    @timed
+    def setup_worker_connection(self):
+        """Setup dedicated TS3 ClientQuery connection for worker thread."""
+        conn = ts3.query.TS3ClientConnection(self.host)
+        conn.auth(apikey=self.api_key)
+        conn.use()
+        
+        # Connect to server if address is configured
+        if self.server_address:
+            try:
+                conn.send(f"connect address={self.server_address} nickname={self.nickname}")
+            except Exception as e:
+                # Ignore "already connected" error
+                pass
+        
+        return conn
+
+    @timed
+    def setup_reference_connection(self):
+        """Setup dedicated TS3 ClientQuery connection for reference data loop."""
+        conn = ts3.query.TS3ClientConnection(self.host)
+        conn.auth(apikey=self.api_key)
+        conn.use()
         
         # Connect to server if address is configured
         if self.server_address:
@@ -403,7 +439,7 @@ class TS3Bot:
         try:
             # Fetch clientlist with all details
             clientlist_start = time.perf_counter()
-            result = self.conn.clientlist(uid=True, away=True)
+            result = self.reference_conn.clientlist(uid=True, away=True)
             clientlist_time = (time.perf_counter() - clientlist_start) * 1000
             logger.debug(f"⏱️ Reference clientlist query: {clientlist_time:.2f}ms")
             
@@ -432,7 +468,7 @@ class TS3Bot:
             
             # Fetch channellist
             channellist_start = time.perf_counter()
-            channel_result = self.conn.channellist()
+            channel_result = self.reference_conn.channellist()
             channellist_time = (time.perf_counter() - channellist_start) * 1000
             logger.debug(f"⏱️ Reference channellist query: {channellist_time:.2f}ms")
             if channel_result.parsed:
@@ -453,7 +489,7 @@ class TS3Bot:
             error_str = str(e).lower()
             if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
                 logger.warning(f"Reference data collection connection error: {e}")
-                self.conn = None
+                self.reference_conn = None
             else:
                 logger.error(f"Error in reference data collection: {e}", exc_info=True)
     
@@ -706,14 +742,14 @@ class TS3Bot:
         # Get current online clients
         try:
             clientlist_start = time.perf_counter()
-            clients = self.conn.clientlist(uid=True).parsed
+            clients = self.worker_conn.clientlist(uid=True).parsed
             clientlist_time = (time.perf_counter() - clientlist_start) * 1000
             logger.debug(f"⏱️ Clientlist query: {clientlist_time:.2f}ms")
         except Exception as e:
             error_str = str(e).lower()
             if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
                 logger.warning(f"Connection error fetching client list for pokes: {e}")
-                self.conn = None
+                self.worker_conn = None
             else:
                 logger.error(f"Error fetching client list for pokes: {e}")
             return
@@ -751,7 +787,7 @@ class TS3Bot:
                 
                 try:
                     poke_start = time.perf_counter()
-                    self.conn.clientpoke(clid=clid, msg=message)
+                    self.worker_conn.clientpoke(clid=clid, msg=message)
                     poke_time = (time.perf_counter() - poke_start) * 1000
                     logger.debug(f"⏱️ Clientpoke: {poke_time:.2f}ms")
                     successfully_poked.add(target_uid)
@@ -761,7 +797,7 @@ class TS3Bot:
                     error_str = str(e).lower()
                     if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
                         logger.warning(f"Connection error while poking {nickname}: {e}")
-                        self.conn = None
+                        self.worker_conn = None
                         connection_broken = True
                         break  # Stop trying if connection is broken
                     else:
@@ -1005,8 +1041,8 @@ class TS3Bot:
                     continue
                 
                 # Check if main connection is available
-                if not self.conn or not self.conn.is_connected():
-                    logger.warning("Main connection not available, requeueing item")
+                if not self.worker_conn or not self.worker_conn.is_connected():
+                    logger.warning("Worker connection not available, requeueing item")
                     self.command_queue.put(item)  # Requeue for later
                     self.command_queue.task_done()
                     time.sleep(1)
@@ -1028,7 +1064,7 @@ class TS3Bot:
                         
                         try:
                             send_start = time.perf_counter()
-                            self.conn.sendtextmessage(targetmode=1, target=clid, msg=response)
+                            self.worker_conn.sendtextmessage(targetmode=1, target=clid, msg=response)
                             send_time = (time.perf_counter() - send_start) * 1000
                             logger.debug(f"⏱️ Send response: {send_time:.2f}ms")
                             logger.debug(f"Sent response to {nickname}")
@@ -1036,19 +1072,26 @@ class TS3Bot:
                             error_str = str(send_error).lower()
                             if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
                                 logger.warning(f"Connection error sending response: {send_error}")
-                                self.conn = None
+                                self.worker_conn = None
                             else:
                                 logger.error(f"Error sending message: {send_error}")
                     
                     elif isinstance(item, dict) and item.get('type') == 'reference_update':
                         # Reference data update request
-                        logger.debug("Processing reference data update")
-                        self._do_reference_update()
+                        if not self.reference_conn or not self.reference_conn.is_connected():
+                            logger.warning("Reference connection not available, skipping reference update")
+                        else:
+                            logger.debug("Processing reference data update")
+                            self._do_reference_update()
                     
                     elif isinstance(item, dict) and item.get('type') == 'send_pokes':
                         # Send pending pokes request
-                        logger.debug("Processing pending pokes")
-                        self._do_send_pokes()
+                        if not self.worker_conn or not self.worker_conn.is_connected():
+                            logger.warning("Worker connection not available, requeueing poke sending")
+                            self.command_queue.put(item)  # Requeue for later
+                        else:
+                            logger.debug("Processing pending pokes")
+                            self._do_send_pokes()
                     
                     elif isinstance(item, dict) and item.get('type') == 'guild_exp_check':
                         # Guild exp check request
@@ -1090,6 +1133,20 @@ class TS3Bot:
         except Exception as e:
             logger.error("Failed to establish event connection: %s", e)
         
+        # Create dedicated connection for worker thread
+        try:
+            self.worker_conn = self.setup_worker_connection()
+            logger.info("Worker connection established")
+        except Exception as e:
+            logger.error("Failed to establish worker connection: %s", e)
+        
+        # Create dedicated connection for reference data loop
+        try:
+            self.reference_conn = self.setup_reference_connection()
+            logger.info("Reference connection established")
+        except Exception as e:
+            logger.error("Failed to establish reference connection: %s", e)
+        
         logger.info("Setting up event loop thread...")
         self._event_thread = threading.Thread(target=self._event_loop, daemon=True)
         self._event_thread.start()
@@ -1115,7 +1172,8 @@ class TS3Bot:
 
         last_conn_reconnect_time = 0
         last_conn_event_reconnect_time = 0
-
+        self.last_worker_conn_reconnect_time = 0
+        self.last_reference_conn_reconnect_time = 0
 
         last_keepalive_time = 0
 
@@ -1125,37 +1183,63 @@ class TS3Bot:
         try:
             while self._running:
                 # Reconnect main connection if needed
-                if self.conn is None or not self.conn.is_connected() and time.time() - last_conn_reconnect_time > 10:
-                    try:
-                        last_conn_reconnect_time = time.time()
-                        logger.info("Main connection not available, attempting to reconnect...")
-                        self.conn = self._reconnect()
-                        logger.info("Main connection re-established")
-                        # Queue pending pokes for sending after reconnection
-                        if self.pending_pokes:
-                            self.command_queue.put({'type': 'send_pokes'})
-                    except Exception as e:
-                        logger.error(f"Failed to reconnect main connection: {e}")
-                        last_conn_reconnect_time = time.time()
-                        continue
-                
+                if  time.time() - last_conn_reconnect_time > 10:
+                    if self.conn is None or not self.conn.is_connected() :
+                        try:
+                            last_conn_reconnect_time = time.time()
+                            logger.info("Main connection not available, attempting to reconnect...")
+                            self.conn = self._reconnect()
+                            logger.info("Main connection re-established")
+                            # Queue pending pokes for sending after reconnection
+                            if self.pending_pokes:
+                                self.command_queue.put({'type': 'send_pokes'})
+                        except Exception as e:
+                            logger.error(f"Failed to reconnect main connection: {e}")
+                            last_conn_reconnect_time = time.time()
+                            continue
+                    
                 # Reconnect event connection if needed
-                if self.event_conn is None or not self.event_conn.is_connected() and time.time() - last_conn_event_reconnect_time > 10:
-                    try:
-                        last_conn_event_reconnect_time = time.time()
-                        logger.info("Event connection not available, attempting to reconnect...")
-                        self.event_conn = self.setup_event_connection()
-                        logger.info("Event connection re-established")
-                        
-                        # Restart event thread if not running
-                        if not self._event_thread or not self._event_thread.is_alive():
-                            logger.info("Restarting event loop thread...")
-                            self._event_thread = threading.Thread(target=self._event_loop, daemon=True)
-                            self._event_thread.start()
-                    except Exception as e:
-                        logger.error("Failed to reconnect event connection: %s", e)
-                        last_conn_event_reconnect_time = time.time()
-                        continue
+                if time.time() - last_conn_event_reconnect_time > 10:
+                    if self.event_conn is None or not self.event_conn.is_connected() :
+                        try:
+                            last_conn_event_reconnect_time = time.time()
+                            logger.info("Event connection not available, attempting to reconnect...")
+                            self.event_conn = self.setup_event_connection()
+                            logger.info("Event connection re-established")
+                            
+                            # Restart event thread if not running
+                            if not self._event_thread or not self._event_thread.is_alive():
+                                logger.info("Restarting event loop thread...")
+                                self._event_thread = threading.Thread(target=self._event_loop, daemon=True)
+                                self._event_thread.start()
+                        except Exception as e:
+                            logger.error("Failed to reconnect event connection: %s", e)
+                            last_conn_event_reconnect_time = time.time()
+                            continue
+                
+                # Reconnect worker connection if needed
+                if time.time() - self.last_worker_conn_reconnect_time > 10:
+                    if self.worker_conn is None or not self.worker_conn.is_connected():
+                        try:
+                            logger.info("Worker connection not available, attempting to reconnect...")
+                            self.worker_conn = self.setup_worker_connection()
+                            logger.info("Worker connection re-established")
+                        except Exception as e:
+                            logger.error("Failed to reconnect worker connection: %s", e)
+                            time.sleep(2)
+                            continue
+                    
+                # Reconnect reference connection if needed
+                if time.time() - self.last_reference_conn_reconnect_time > 10:
+                    if self.reference_conn is None or not self.reference_conn.is_connected():
+                        try:
+                            logger.info("Reference connection not available, attempting to reconnect...")
+                            self.reference_conn = self.setup_reference_connection()
+                            logger.info("Reference connection re-established")
+                        except Exception as e:
+                            logger.error("Failed to reconnect reference connection: %s", e)
+                            time.sleep(2)
+                            continue
                 
                 # Send keepalive and check connection health
                 if time.time() - last_keepalive_time > 120:
@@ -1164,9 +1248,13 @@ class TS3Bot:
                         keepalive_start = time.perf_counter()
                         self.conn.send_keepalive()
                         self.event_conn.send_keepalive()
+                        self.worker_conn.send_keepalive()
+                        self.reference_conn.send_keepalive()
                         # Ensure connections are still connected to the server
                         self._ensure_server_connection(self.conn, "Main connection")
                         self._ensure_server_connection(self.event_conn, "Event connection")
+                        self._ensure_server_connection(self.worker_conn, "Worker connection")
+                        self._ensure_server_connection(self.reference_conn, "Reference connection")
                         keepalive_time = (time.perf_counter() - keepalive_start) * 1000
                         logger.debug(f"⏱️ Keepalive + connection checks: {keepalive_time:.2f}ms")
                     except Exception as e:
@@ -1202,6 +1290,16 @@ class TS3Bot:
                     self.event_conn.close()
                 except Exception as e:
                     logger.error(f"Error closing event connection: {e}")
+            if self.worker_conn:
+                try:
+                    self.worker_conn.close()
+                except Exception as e:
+                    logger.error(f"Error closing worker connection: {e}")
+            if self.reference_conn:
+                try:
+                    self.reference_conn.close()
+                except Exception as e:
+                    logger.error(f"Error closing reference connection: {e}")
             if self.conn:
                 try:
                     self.conn.close()
