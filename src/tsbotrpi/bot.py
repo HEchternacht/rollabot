@@ -54,14 +54,17 @@ class TS3Bot:
         self.last_guild_refresh_ts = None
         # self.last_friendly_guild_refresh_ts = None  # Commented out - not needed anymore
 
-    def _ensure_server_connection(self):
+    def _ensure_server_connection(self, conn=None, conn_name="connection"):
         """Check if connected to server and reconnect if needed."""
-        if not self.conn or not self.server_address:
+        if conn is None:
+            conn = self.conn
+        
+        if not conn or not self.server_address:
             return
         
         try:
             # Check current connection status
-            whoami = self.conn.whoami().parsed[0]
+            whoami = conn.whoami().parsed[0]
             client_type = whoami.get('client_type', '')
             
             # If client_type is 1, we're connected to a server
@@ -69,19 +72,19 @@ class TS3Bot:
                 return  # Already connected
             
             # Not connected to server, try to connect
-            logger.info("Not connected to server, attempting to connect...")
-            self.conn.send(f"connect address={self.server_address} nickname={self.nickname}")
-            logger.info("Connected to server %s as %s", self.server_address, self.nickname)
+            logger.info(f"{conn_name} not connected to server, attempting to connect...")
+            conn.send(f"connect address={self.server_address} nickname={self.nickname}")
+            logger.info(f"{conn_name} connected to server %s as %s", self.server_address, self.nickname)
             
         except Exception as e:
             # Try to connect anyway
             try:
-                self.conn.send(f"connect address={self.server_address} nickname={self.nickname}")
-                logger.info("Connected to server %s as %s", self.server_address, self.nickname)
+                conn.send(f"connect address={self.server_address} nickname={self.nickname}")
+                logger.info(f"{conn_name} connected to server %s as %s", self.server_address, self.nickname)
             except Exception as e2:
                 # Ignore "already connected" error (id 1796)
                 if "1796" not in str(e2):
-                    logger.debug(f"Server connection check/reconnect failed: {e2}")
+                    logger.debug(f"{conn_name} server connection check/reconnect failed: {e2}")
 
     def setup_connection(self):
         """Setup TS3 ClientQuery connection for commands and operations."""
@@ -995,8 +998,11 @@ class TS3Bot:
                 try:
                     self.conn.send_keepalive()
                     self.event_conn.send_keepalive()
-                    # Ensure we're still connected to the server
-                    self._ensure_server_connection()
+                    self.worker_conn.send_keepalive()
+                    # Ensure all connections are still connected to the server
+                    self._ensure_server_connection(self.conn, "Main connection")
+                    self._ensure_server_connection(self.event_conn, "Event connection")
+                    self._ensure_server_connection(self.worker_conn, "Worker connection")
                 except Exception as e:
                     error_str = str(e).lower()
                     if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
