@@ -238,9 +238,34 @@ def get_recent_logs(minutes: int, max_results: int = 100):
         # Get log file paths
         log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         readable_log_path = os.path.join(log_dir, 'activity_log_readable.csv')
+        users_seen_path = os.path.join(log_dir, 'users_seen.csv')
+        clients_ref_path = os.path.join(log_dir, 'clients_reference.csv')
         
         if not os.path.exists(readable_log_path):
             return "Activity log not found. No events have been logged yet."
+        
+        # Build UID to nickname mapping
+        uid_to_nickname = {}
+        
+        # Read from clients_reference.csv (current data)
+        if os.path.exists(clients_ref_path):
+            with open(clients_ref_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    uid = row.get('uid', '').strip()
+                    nickname = row.get('nickname', '').strip()
+                    if uid and nickname:
+                        uid_to_nickname[uid] = nickname
+        
+        # Read from users_seen.csv (historical data) - don't overwrite existing
+        if os.path.exists(users_seen_path):
+            with open(users_seen_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    uid = row.get('UID', '').strip()
+                    nickname = row.get('NICKNAME', '').strip()
+                    if uid and nickname and uid not in uid_to_nickname:
+                        uid_to_nickname[uid] = nickname
         
         # Calculate cutoff time
         cutoff_time = datetime.now() - timedelta(minutes=minutes)
@@ -252,7 +277,10 @@ def get_recent_logs(minutes: int, max_results: int = 100):
             
             for row in reader:
                 timestamp_str = row.get('TIMESTAMP', '')
-                if not timestamp_str:
+                uid = row.get('UID', '').strip()
+                
+                # Skip invalid entries
+                if not timestamp_str or not uid or uid.upper() == 'N/A':
                     continue
                 
                 try:
@@ -277,10 +305,13 @@ def get_recent_logs(minutes: int, max_results: int = 100):
         
         for i, match in enumerate(matches, 1):
             timestamp = match.get('TIMESTAMP', '')
-            uid = match.get('UID', '')[:12] + '...' if match.get('UID', '') else 'N/A'
+            uid = match.get('UID', '').strip()
             event = match.get('EVENT', 'unknown event')
             
-            result += f"{i}. [{timestamp}] {uid}\n"
+            # Get nickname from mapping, fallback to truncated UID
+            nickname = uid_to_nickname.get(uid, uid[:12] + '...')
+            
+            result += f"{i}. [{timestamp}] {nickname}\n"
             result += f"   {event}\n\n"
         
         if len(matches) == max_results:
@@ -396,13 +427,13 @@ def get_users_list():
         return f"Error: {str(e)}"
 
 
-def search_activity_log(search_term: str, max_results: int = 15):
+def search_activity_log(search_term: str, max_results: int = 50):
     """
     Search human-readable activity log for entries matching uid, nickname, or ip.
     
     Args:
         search_term: The uid, nickname, or ip to search for
-        max_results: Maximum number of results to return
+        max_results: Maximum number of results to return (default: 50, shows LAST entries)
     
     Returns:
         str: Formatted results or error message
@@ -459,21 +490,22 @@ def search_activity_log(search_term: str, max_results: int = 15):
             target_uids.add(search_term)
             logger.debug(f"No match found in reference files, using search term as UID: {search_term}")
         
-        # Now search the readable activity log for these UIDs
-        matches = []
+        # Now search the readable activity log for these UIDs - collect ALL matches
+        all_matches = []
         with open(readable_log_path, 'r', newline='', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             
             for row in reader:
                 uid = row.get('UID', '')
                 if uid in target_uids:
-                    matches.append(row)
-                    
-                    if len(matches) >= max_results:
-                        break
+                    all_matches.append(row)
         
-        if not matches:
+        if not all_matches:
             return f"No activity found for: {search_term}"
+        
+        # Take only the LAST max_results entries
+        matches = all_matches[-max_results:]
+        total_found = len(all_matches)
         
         # Format results
         user_display = search_term
@@ -483,15 +515,15 @@ def search_activity_log(search_term: str, max_results: int = 15):
                 nickname, ip = matched_user_info[uid]
                 user_display = f"{nickname} ({uid[:8]}...)"
         
-        result = f"Found {len(matches)} activities for '{user_display}':\n"
+        result = f"Found {total_found} activities for '{user_display}' (showing last {len(matches)}):\n"
         for i, match in enumerate(matches, 1):
             timestamp = match.get('TIMESTAMP', '')
             event = match.get('EVENT', 'unknown event')
             
             result += f"{i}. [{timestamp}] {event}\n"
         
-        if len(matches) == max_results:
-            result += f"\n(Showing first {max_results} results)"
+        if total_found > max_results:
+            result += f"\n(Showing last {max_results} of {total_found} total results)"
         
         return result
         
