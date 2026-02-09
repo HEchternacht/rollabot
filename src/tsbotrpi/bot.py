@@ -7,6 +7,7 @@ from datetime import datetime
 from urllib.parse import quote as encodeURIComponent
 import requests
 from queue import Queue
+from collections import deque
 
 from .commands import process_command
 from .activity_logger import (
@@ -53,6 +54,9 @@ class TS3Bot:
         # Guild exp monitoring
         self.last_guild_refresh_ts = None
         # self.last_friendly_guild_refresh_ts = None  # Commented out - not needed anymore
+        
+        # Pending pokes queue for reliable delivery
+        self.pending_pokes = deque()  # Each item: {'message': str, 'target_uids': set, 'timestamp': float}
 
     def _ensure_server_connection(self, conn=None, conn_name="connection"):
         """Check if connected to server and reconnect if needed."""
@@ -416,6 +420,9 @@ class TS3Bot:
                 self._check_guild_exp()
                 # self._check_friendly_guild_exp()  # Commented out - not needed anymore
                 
+                # Try to send any pending pokes
+                self._send_pending_pokes()
+                
             except Exception as e:
                 error_str = str(e).lower()
                 # Check for connection errors
@@ -504,45 +511,16 @@ class TS3Bot:
                 logger.debug("No registered users for guild exp notifications")
                 return
             
-            # Get current client list to find CLIDs from UIDs
-            if not self.conn or not self.conn.is_connected():
-                logger.warning("Cannot send guild exp notifications: not connected")
-                return
+            # Add this poke to the queue for reliable delivery
+            self.pending_pokes.append({
+                'message': message,
+                'target_uids': registered_uids.copy(),
+                'timestamp': time.time()
+            })
+            logger.info(f"Queued guild exp notification for {len(registered_uids)} registered users")
             
-            try:
-                clients = self.conn.clientlist(uid=True).parsed
-                
-                # Poke each registered user who is online
-                poked_count = 0
-                for client in clients:
-                    client_uid = client.get('client_unique_identifier', '')
-                    if client_uid in registered_uids:
-                        clid = client.get('clid')
-                        try:
-                            self.conn.clientpoke(clid=clid, msg=message)
-                            poked_count += 1
-                            logger.debug(f"Poked {client.get('client_nickname', 'Unknown')} with guild exp update")
-                        except Exception as e:
-                            error_str = str(e).lower()
-                            if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
-                                logger.warning(f"Connection error while poking client {clid}: {e}")
-                                self.conn = None
-                                break  # Stop trying if connection is broken
-                            else:
-                                logger.error(f"Failed to poke client {clid}: {e}")
-                
-                if poked_count > 0:
-                    logger.info(f"Notified {poked_count} registered users of guild exp gains")
-                else:
-                    logger.debug("No registered users currently online")
-                    
-            except Exception as e:
-                error_str = str(e).lower()
-                if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
-                    logger.warning(f"Connection error sending guild exp notifications: {e}")
-                    self.conn = None
-                else:
-                    logger.error(f"Error sending guild exp notifications: {e}")
+            # Try to send immediately
+            self._send_pending_pokes()
                 
         except requests.RequestException as e:
             logger.warning(f"Failed to fetch guild exp data: {e}")
@@ -668,6 +646,105 @@ class TS3Bot:
     #         logger.warning(f"Failed to fetch friendly guild exp data: {e}")
     #     except Exception as e:
     #         logger.error(f"Error in friendly guild exp check: {e}")
+    
+    def _send_pending_pokes(self):
+        """Send all pending pokes to registered users who are online."""
+        if not self.pending_pokes:
+            return
+        
+        # Check connection
+        if not self.conn or not self.conn.is_connected():
+            logger.debug("Cannot send pending pokes: not connected")
+            return
+        
+        # Get current online clients
+        try:
+            clients = self.conn.clientlist(uid=True).parsed
+        except Exception as e:
+            error_str = str(e).lower()
+            if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
+                logger.warning(f"Connection error fetching client list for pokes: {e}")
+                self.conn = None
+            else:
+                logger.error(f"Error fetching client list for pokes: {e}")
+            return
+        
+        # Build UID to CLID mapping for online users
+        uid_to_clid = {}
+        for client in clients:
+            client_uid = client.get('client_unique_identifier', '')
+            if client_uid:
+                uid_to_clid[client_uid] = {
+                    'clid': client.get('clid'),
+                    'nickname': client.get('client_nickname', 'Unknown')
+                }
+        
+        # Process each pending poke
+        pokes_to_keep = deque()
+        total_sent = 0
+        
+        for poke_item in self.pending_pokes:
+            message = poke_item['message']
+            target_uids = poke_item['target_uids']
+            timestamp = poke_item['timestamp']
+            
+            # Remove UIDs of users we successfully poke
+            successfully_poked = set()
+            connection_broken = False
+            
+            for target_uid in target_uids:
+                if target_uid not in uid_to_clid:
+                    # User not online, keep in queue
+                    continue
+                
+                clid = uid_to_clid[target_uid]['clid']
+                nickname = uid_to_clid[target_uid]['nickname']
+                
+                try:
+                    self.conn.clientpoke(clid=clid, msg=message)
+                    successfully_poked.add(target_uid)
+                    total_sent += 1
+                    logger.debug(f"Poked {nickname} with pending message")
+                except Exception as e:
+                    error_str = str(e).lower()
+                    if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
+                        logger.warning(f"Connection error while poking {nickname}: {e}")
+                        self.conn = None
+                        connection_broken = True
+                        break  # Stop trying if connection is broken
+                    else:
+                        logger.error(f"Failed to poke {nickname}: {e}")
+                        # Still mark as successfully processed to avoid infinite retries
+                        successfully_poked.add(target_uid)
+            
+            # Update target UIDs by removing successfully poked users
+            remaining_uids = target_uids - successfully_poked
+            
+            # Keep the poke in queue if there are remaining targets and it's not too old
+            age_hours = (time.time() - timestamp) / 3600
+            if remaining_uids and age_hours < 24:  # Keep for up to 24 hours
+                poke_item['target_uids'] = remaining_uids
+                pokes_to_keep.append(poke_item)
+                logger.debug(f"Poke message kept in queue for {len(remaining_uids)} remaining targets")
+            elif age_hours >= 24:
+                logger.info(f"Dropped old poke message (age: {age_hours:.1f}h) for {len(remaining_uids)} users")
+            
+            # If connection broke, keep all remaining pokes and stop processing
+            if connection_broken:
+                # Add back current poke if it has remaining targets
+                if remaining_uids:
+                    if poke_item not in pokes_to_keep:
+                        pokes_to_keep.append(poke_item)
+                # Keep all remaining unprocessed pokes
+                for remaining_poke in list(self.pending_pokes)[list(self.pending_pokes).index(poke_item) + 1:]:
+                    pokes_to_keep.append(remaining_poke)
+                break
+        
+        # Update pending pokes queue
+        self.pending_pokes = pokes_to_keep
+        
+        if total_sent > 0:
+            logger.info(f"Sent {total_sent} pending poke notifications ({len(self.pending_pokes)} pokes still queued)")
     
     def _update_client_map(self, clid: str, data: dict):
         """Update client map with new data."""
@@ -963,6 +1040,8 @@ class TS3Bot:
                         logger.info("Main connection not available, attempting to reconnect...")
                         self.conn = self.setup_connection()
                         logger.info("Main connection re-established")
+                        # Try to send any pending pokes after reconnection
+                        self._send_pending_pokes()
                     except Exception as e:
                         logger.error(f"Failed to reconnect main connection: {e}")
                         time.sleep(5)
