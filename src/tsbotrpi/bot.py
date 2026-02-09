@@ -382,77 +382,83 @@ class TS3Bot:
         """Thread that collects reference data every minute."""
         logger.info("Reference data collection thread started")
         
-        
+        i=0
         while self._running:
             time.sleep(60)  # Wait 1 minute
-            
-            if not self.reference_conn or not self.reference_conn.is_connected():
-                continue
-            
-            try:
-                # Fetch clientlist with all details
-                result = self.reference_conn.clientlist(
-                    uid=True, 
-                    away=True, 
+            if i%10 == 0:
+                i=0
+                if not self.reference_conn or not self.reference_conn.is_connected():
+                    continue
+                
+                try:
+                    # Fetch clientlist with all details
+                    result = self.reference_conn.clientlist(
+                        uid=True, 
+                        away=True, 
 
-    
-                )
-                
-                if result.parsed:
-                    clients = []
-                    for client in result.parsed:
-                        clients.append({
-                            'clid': client.get('clid', ''),
-                            'client_nickname': client.get('client_nickname', ''),
-                            'client_unique_identifier': client.get('client_unique_identifier', ''),
-                            'connection_client_ip': client.get('connection_client_ip', '')
-                        })
-                    
-                    # Update reference manager
-                    if self.reference_manager:
-                        self.reference_manager.update_clients(clients)
-                    
-                    # Update users seen tracker
-                    if self.users_seen_tracker:
-                        self.users_seen_tracker.add_users(clients)
-                    
-                    logger.debug(f"Updated reference data with {len(clients)} clients")
-                
-                # Fetch channellist
-                channel_result = self.reference_conn.channellist()
-                if channel_result.parsed:
-                    channels = []
-                    for channel in channel_result.parsed:
-                        channels.append({
-                            'cid': channel.get('cid', ''),
-                            'channel_name': channel.get('channel_name', '')
-                        })
-                    
-                    # Update reference manager
-                    if self.reference_manager:
-                        self.reference_manager.update_channels(channels)
-                    
-                    logger.debug(f"Updated reference data with {len(channels)} channels")
-                
-                # Check guild exp and notify registered users
-                self._check_guild_exp()
-                # self._check_friendly_guild_exp()  # Commented out - not needed anymore
-                
-                # Try to send any pending pokes
-                self._send_pending_pokes()
-                
-            except Exception as e:
-                error_str = str(e).lower()
-                # Check for connection errors (including error 1794 - not connected)
-                if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
-                    logger.warning(f"Reference data collection connection error: {e}")
-                    # Mark reference connection as broken for reconnection
-                    self.reference_conn = None
-                    time.sleep(5)
-                else:
-                    logger.error(f"Error in reference data collection: {e}", exc_info=True)
-                    time.sleep(2)
         
+                    )
+                    
+                    if result.parsed:
+                        clients = []
+                        for client in result.parsed:
+                            clients.append({
+                                'clid': client.get('clid', ''),
+                                'client_nickname': client.get('client_nickname', ''),
+                                'client_unique_identifier': client.get('client_unique_identifier', ''),
+                                'connection_client_ip': client.get('connection_client_ip', '')
+                            })
+                        
+                        # Update reference manager
+                        if self.reference_manager:
+                            self.reference_manager.update_clients(clients)
+                        
+                        # Update users seen tracker
+                        if self.users_seen_tracker:
+                            self.users_seen_tracker.add_users(clients)
+                        
+                        logger.debug(f"Updated reference data with {len(clients)} clients")
+                    
+                    # Fetch channellist
+                    channel_result = self.reference_conn.channellist()
+                    if channel_result.parsed:
+                        channels = []
+                        for channel in channel_result.parsed:
+                            channels.append({
+                                'cid': channel.get('cid', ''),
+                                'channel_name': channel.get('channel_name', '')
+                            })
+                        
+                        # Update reference manager
+                        if self.reference_manager:
+                            self.reference_manager.update_channels(channels)
+                        
+                        logger.debug(f"Updated reference data with {len(channels)} channels")
+                except Exception as e:
+                    error_str = str(e).lower()
+                    # Check for connection errors (including error 1794 - not connected)
+                    if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
+                        logger.warning(f"Reference data collection connection error: {e}")
+                        # Mark reference connection as broken for reconnection
+                        self.reference_conn = None
+                        time.sleep(5)
+                    else:
+                        logger.error(f"Error in reference data collection: {e}", exc_info=True)
+                        time.sleep(2)
+           
+                            
+                    
+
+            else:
+                try:
+                    self._check_guild_exp()
+            
+                    self._send_pending_pokes()
+                
+                except Exception as e:
+                    logger.error(f"Error in reference data loop: {e}", exc_info=True)
+                    
+            
         logger.info("Reference data collection thread stopped")
     
     def _check_guild_exp(self):
