@@ -41,12 +41,13 @@ class TS3Bot:
                 #logger.info("Connected to server %s as %s", self.server_address, self.nickname)
             except Exception as e:
                 # Ignore "already connected" error (id 1796)
-                if "1796" in str(e) or "currently not possible" in str(e).lower():
-                    logger.debug("Already connected to server")
-                else:
-                    logger.warning("Connect command failed: %s", e)
+                #if "1796" in str(e) or "currently not possible" in str(e).lower():
+                #    logger.debug("Already connected to server")
+                #else:
+                #    logger.warning("Connect command failed: %s", e)
+                pass
         
-        logger.info("Connected to ClientQuery at %s", self.host)
+        #logger.info("Connected to ClientQuery at %s", self.host)
         
         # Initialize activity logger on first successful connection
         if not self.activity_logger:
@@ -343,7 +344,7 @@ class TS3Bot:
                         self._event_thread.start()
                         logger.info("Event thread started")
                 except Exception as e:
-                    logger.error("Connection failed: %s", e)
+                    #logger.error("Connection failed: %s", e)
                     self._reconnect(e)
                     time.sleep(2)
                     continue
