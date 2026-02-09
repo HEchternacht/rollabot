@@ -759,6 +759,11 @@ class TS3Bot:
         except Exception as e:
             logger.error(f"Error handling event {event_type}: {e}")
 
+
+
+
+
+
     def _event_loop(self):
         """Event handler thread - listens for all events without timeout."""
         logger.info("Event loop thread started")
@@ -773,11 +778,14 @@ class TS3Bot:
                 # Wait for events (no timeout - blocking call)
                 event = self.event_conn.wait_for_event()
 
+                    
                 if event and event.parsed and event._data and len(event._data) > 0:
-                    # Extract event type from raw data
+                    # Flatten event data by splitting on pipe delimiter
+                    split_data = event._data[0].split(b'|')
+                    
                     for i in range(len(event.parsed)):
                         try:
-                            event_type = event._data[i].decode("utf-8").split()[0]
+                            event_type = split_data[i].decode("utf-8").split()[0]
                         except (AttributeError, IndexError, UnicodeDecodeError) as e:
                             logger.error(f"Failed to extract event type: {e}, event data: {event._data}")
                             continue
