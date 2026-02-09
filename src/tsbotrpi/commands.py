@@ -12,6 +12,88 @@ logger = logging.getLogger(__name__)
 import requests
 
 
+def register_exp_user(uid: str) -> str:
+    """
+    Register a user for guild exp notifications.
+    
+    Args:
+        uid: User UID to register
+    
+    Returns:
+        str: Success or error message
+    """
+    try:
+        log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        registered_file = os.path.join(log_dir, 'registered.txt')
+        
+        # Load existing UIDs
+        registered_uids = set()
+        if os.path.exists(registered_file):
+            with open(registered_file, 'r', encoding='utf-8') as f:
+                registered_uids = set(line.strip() for line in f if line.strip())
+        
+        # Check if already registered
+        if uid in registered_uids:
+            return "You are already registered for guild exp notifications."
+        
+        # Add new UID
+        registered_uids.add(uid)
+        
+        # Write back to file
+        with open(registered_file, 'w', encoding='utf-8') as f:
+            for registered_uid in sorted(registered_uids):
+                f.write(f"{registered_uid}\n")
+        
+        logger.info(f"Registered {uid} for guild exp notifications")
+        return "Successfully registered for guild exp notifications!"
+        
+    except Exception as e:
+        logger.error(f"Error registering user for exp notifications: {e}")
+        return f"Error registering: {str(e)}"
+
+
+def unregister_exp_user(uid: str) -> str:
+    """
+    Unregister a user from guild exp notifications.
+    
+    Args:
+        uid: User UID to unregister
+    
+    Returns:
+        str: Success or error message
+    """
+    try:
+        log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        registered_file = os.path.join(log_dir, 'registered.txt')
+        
+        if not os.path.exists(registered_file):
+            return "You are not registered for guild exp notifications."
+        
+        # Load existing UIDs
+        registered_uids = set()
+        with open(registered_file, 'r', encoding='utf-8') as f:
+            registered_uids = set(line.strip() for line in f if line.strip())
+        
+        # Check if registered
+        if uid not in registered_uids:
+            return "You are not registered for guild exp notifications."
+        
+        # Remove UID
+        registered_uids.remove(uid)
+        
+        # Write back to file
+        with open(registered_file, 'w', encoding='utf-8') as f:
+            for registered_uid in sorted(registered_uids):
+                f.write(f"{registered_uid}\n")
+        
+        logger.info(f"Unregistered {uid} from guild exp notifications")
+        return "Successfully unregistered from guild exp notifications."
+        
+    except Exception as e:
+        logger.error(f"Error unregistering user from exp notifications: {e}")
+        return f"Error unregistering: {str(e)}"
+
+
 def get_txt():
     api_url="https://xinga-me.appspot.com/api"
     try:
@@ -251,6 +333,8 @@ def process_command(bot, msg, nickname):
             "!snapshot - Get detailed client snapshot\n"
             "!logger <uid/nickname/ip> - Search activity log for user\n"
             "!lastminuteslogs <minutes> - Get activity from last N minutes\n"
+            "!registerexp - Register for guild exp notifications\n"
+            "!unregisterexp - Unregister from guild exp notifications\n"
         )
 
 
@@ -298,6 +382,44 @@ def process_command(bot, msg, nickname):
             return get_recent_logs(minutes)
         except ValueError:
             return "Invalid number. Usage: !lastminuteslogs <minutes>"
+    
+    # Register for guild exp notifications
+    if msg.startswith("!registerexp"):
+        # Get user UID from bot
+        try:
+            clid = bot.conn.clientlist().parsed
+            user_uid = None
+            for client in clid:
+                if client.get('client_nickname') == nickname:
+                    user_uid = client.get('client_unique_identifier', '')
+                    break
+            
+            if user_uid:
+                return register_exp_user(user_uid)
+            else:
+                return "Could not find your UID. Please try again."
+        except Exception as e:
+            logger.error(f"Error in registerexp command: {e}")
+            return "Error registering. Please try again."
+    
+    # Unregister from guild exp notifications
+    if msg.startswith("!unregisterexp"):
+        # Get user UID from bot
+        try:
+            clid = bot.conn.clientlist().parsed
+            user_uid = None
+            for client in clid:
+                if client.get('client_nickname') == nickname:
+                    user_uid = client.get('client_unique_identifier', '')
+                    break
+            
+            if user_uid:
+                return unregister_exp_user(user_uid)
+            else:
+                return "Could not find your UID. Please try again."
+        except Exception as e:
+            logger.error(f"Error in unregisterexp command: {e}")
+            return "Error unregistering. Please try again."
     
     # Unknown command
 

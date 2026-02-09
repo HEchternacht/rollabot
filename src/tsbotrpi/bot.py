@@ -3,6 +3,9 @@ import time
 import threading
 import os
 import ts3
+from datetime import datetime
+from urllib.parse import quote as encodeURIComponent
+import requests
 
 from .commands import process_command
 from .activity_logger import (
@@ -41,6 +44,9 @@ class TS3Bot:
         # Duplicate event prevention
         self.last_event = None
         self.last_event_timestamp = 0
+        
+        # Guild exp monitoring
+        self.last_guild_refresh_ts = None
 
     def setup_connection(self):
         """Setup TS3 ClientQuery connection."""
@@ -336,10 +342,121 @@ class TS3Bot:
                     
                     logger.debug(f"Updated reference data with {len(channels)} channels")
                 
+                # Check guild exp and notify registered users
+                self._check_guild_exp()
+                
             except Exception as e:
                 logger.error(f"Error in reference data collection: {e}")
         
         logger.info("Reference data collection thread stopped")
+    
+    def _check_guild_exp(self):
+        """Check guild exp API and notify registered users of gains."""
+        try:
+            # Configuration
+            only_online = True
+            guild = "Ascended Auroria"
+            world = "Auroria"
+            base_url = "https://rubinot-guild-monitor.onrender.com/"
+            
+            # Build URL
+            url = f"/api/guild-exp?guild={encodeURIComponent(guild)}&world={encodeURIComponent(world)}&only_online={1 if only_online else 0}"
+            
+            # Make request
+            response = requests.get(base_url + url, timeout=10)
+            if response.status_code != 200:
+                logger.warning(f"Guild exp API returned status {response.status_code}")
+                return
+            
+            data = response.json()
+            current_refresh_ts = data.get('last_refresh_ts')
+            
+            # Skip if no refresh or same as last check
+            if not current_refresh_ts:
+                logger.debug("No refresh timestamp in guild exp data")
+                return
+            
+            if self.last_guild_refresh_ts == current_refresh_ts:
+                logger.debug("Guild exp data hasn't been refreshed since last check")
+                return
+            
+            # Update timestamp
+            self.last_guild_refresh_ts = current_refresh_ts
+            
+            # Get members with exp gains
+            members_with_gains = [m for m in data.get('members', []) if m.get('delta_experience', 0) > 0]
+            
+            if not members_with_gains:
+                logger.debug("No guild members with exp gains")
+                return
+            
+            # Format notification message
+            refresh_time = datetime.fromtimestamp(current_refresh_ts).strftime('%d/%m/%Y %H:%M:%S')
+            message = f"Guild Exp Update ({refresh_time}):\n"
+            message += "=" * 50 + "\n\n"
+            
+            for member in members_with_gains:
+                name = member.get('name', 'Unknown')
+                delta_exp = member.get('delta_experience', 0)
+                level = member.get('level', 0)
+                vocation = member.get('vocation', 'Unknown')
+                
+                # Format exp with thousands separator
+                delta_exp_formatted = f"{delta_exp:,}"
+                
+                message += f"{name} (Lvl {level} {vocation})\n"
+                message += f"  +{delta_exp_formatted} exp\n\n"
+            
+            logger.info(f"Guild exp gains detected for {len(members_with_gains)} members")
+            
+            # Load registered users
+            log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            registered_file = os.path.join(log_dir, 'registered.txt')
+            
+            if not os.path.exists(registered_file):
+                logger.debug("No registered users for guild exp notifications")
+                return
+            
+            with open(registered_file, 'r', encoding='utf-8') as f:
+                registered_uids = set(line.strip() for line in f if line.strip())
+            
+            if not registered_uids:
+                logger.debug("No registered users for guild exp notifications")
+                return
+            
+            # Get current client list to find CLIDs from UIDs
+            if not self.conn or not self.conn.is_connected():
+                logger.warning("Cannot send guild exp notifications: not connected")
+                return
+            
+            try:
+                clients = self.conn.clientlist(uid=True).parsed
+                
+                # Poke each registered user who is online
+                poked_count = 0
+                for client in clients:
+                    client_uid = client.get('client_unique_identifier', '')
+                    if client_uid in registered_uids:
+                        clid = client.get('clid')
+                        try:
+                            self.conn.clientpoke(clid=clid, msg=message)
+                            poked_count += 1
+                            logger.debug(f"Poked {client.get('client_nickname', 'Unknown')} with guild exp update")
+                        except Exception as e:
+                            logger.error(f"Failed to poke client {clid}: {e}")
+                
+                if poked_count > 0:
+                    logger.info(f"Notified {poked_count} registered users of guild exp gains")
+                else:
+                    logger.debug("No registered users currently online")
+                    
+            except Exception as e:
+                logger.error(f"Error sending guild exp notifications: {e}")
+                
+        except requests.RequestException as e:
+            logger.error(f"Failed to fetch guild exp data: {e}")
+        except Exception as e:
+            logger.error(f"Error in guild exp check: {e}")
     
     def _update_client_map(self, clid: str, data: dict):
         """Update client map with new data."""
@@ -438,7 +555,7 @@ class TS3Bot:
         while self._running:
             if not self.conn or not self.conn.is_connected():
                 time.sleep(1)
-                logger.debug("No connection in event loop, sleeping...")
+                #logger.debug("No connection in event loop, sleeping...")
                 continue
             
             try:
