@@ -425,11 +425,13 @@ class TS3Bot:
                 
             except Exception as e:
                 error_str = str(e).lower()
-                # Check for connection errors
-                if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
+                # Check for connection errors (including error 1794 - not connected)
+                if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
                     logger.warning(f"Reference data collection connection error: {e}")
-                    # Mark connection as broken so main loop reconnects it
+                    # Mark all connections as broken for full reconnection
                     self.conn = None
+                    self.event_conn = None
+                    self.worker_conn = None
                     time.sleep(5)
                 else:
                     logger.error(f"Error in reference data collection: {e}", exc_info=True)
@@ -662,7 +664,7 @@ class TS3Bot:
             clients = self.conn.clientlist(uid=True).parsed
         except Exception as e:
             error_str = str(e).lower()
-            if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
+            if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
                 logger.warning(f"Connection error fetching client list for pokes: {e}")
                 self.conn = None
             else:
@@ -707,7 +709,7 @@ class TS3Bot:
                     logger.debug(f"Poked {nickname} with pending message")
                 except Exception as e:
                     error_str = str(e).lower()
-                    if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
+                    if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
                         logger.warning(f"Connection error while poking {nickname}: {e}")
                         self.conn = None
                         connection_broken = True
@@ -913,7 +915,7 @@ class TS3Bot:
                 if self._running:  # Only log if we're supposed to be running
                     error_str = str(e).lower()
                     # Check for connection errors
-                    if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
+                    if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
                         logger.warning(f"Event connection error: {e}")
                         # Mark connection as broken so it gets reconnected
                         self.event_conn = None
@@ -958,7 +960,7 @@ class TS3Bot:
                         except Exception as send_error:
                             error_str = str(send_error).lower()
                             # Check for connection errors
-                            if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
+                            if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
                                 logger.warning(f"Connection error on attempt {attempt + 1}/{max_retries}: {send_error}")
                                 # Mark connection as broken
                                 self.worker_conn = None
@@ -1092,7 +1094,7 @@ class TS3Bot:
                     self._ensure_server_connection(self.worker_conn, "Worker connection")
                 except Exception as e:
                     error_str = str(e).lower()
-                    if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket']):
+                    if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
                         logger.warning(f"Keepalive connection error: {e}")
                         # Mark connections as broken
                         self.conn = None
