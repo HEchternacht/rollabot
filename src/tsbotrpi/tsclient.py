@@ -86,11 +86,14 @@ class TSClientManager:
         
         # Linux: Use x-terminal-emulator
         if os.name != "nt":
+            # Prepend BOX64 environment variables to command
+            linux_command = f"export BOX64_DYNAREC=1; export BOX64_DYNAREC_STRONGMEM=0; export BOX64_LOG=0; export BOX64_NOBANNER=1; {self.command}"
+            
             terminal_cmds = [
-                ['x-terminal-emulator', '-e', 'bash', '-c', self.command],
-                ['gnome-terminal', '--', 'bash', '-c', self.command],
-                ['konsole', '-e', 'bash', '-c', self.command],
-                ['xterm', '-e', 'bash', '-c', self.command]
+                ['x-terminal-emulator', '-e', 'bash', '-c', linux_command],
+                ['gnome-terminal', '--', 'bash', '-c', linux_command],
+                ['konsole', '-e', 'bash', '-c', linux_command],
+                ['xterm', '-e', 'bash', '-c', linux_command]
             ]
             
             for term_cmd in terminal_cmds:
@@ -114,7 +117,7 @@ class TSClientManager:
                 # No terminal found, run directly
                 logger.warning("No terminal emulator found, running directly")
                 process = subprocess.Popen(
-                    self.command,
+                    linux_command,
                     shell=True,
                     start_new_session=True,
                     stdout=subprocess.DEVNULL,
