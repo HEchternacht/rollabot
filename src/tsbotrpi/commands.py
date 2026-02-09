@@ -25,11 +25,12 @@ def register_exp_user(uid: str) -> str:
     try:
         log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         registered_file = os.path.join(log_dir, 'registered.txt')
-        
+        logger.debug(f"Registering UID: {uid} in file: {registered_file}")
         # Load existing UIDs
         registered_uids = set()
         if os.path.exists(registered_file):
             with open(registered_file, 'r', encoding='utf-8') as f:
+                logger.debug(f"Reading existing registered UIDs from {registered_file}")
                 registered_uids = set(line.strip() for line in f if line.strip())
         
         # Check if already registered
@@ -387,22 +388,31 @@ def process_command(bot, msg, nickname):
     if msg.startswith("!registerexp"):
         # Get user UID from reference data (avoid API calls from event loop)
         try:
+            logger.debug(f"Processing registerexp for nickname: {nickname}")
             user_uid = None
             
             # Use reference manager's client_map if available
             if hasattr(bot, 'client_map') and bot.client_map:
+                logger.debug("Looking up UID in bot's client_map")
                 for clid, client_info in bot.client_map.items():
+                    logger.debug(f"Checking client: {client_info.get('nickname', '')}")
                     if client_info.get('nickname', '').lower() == nickname.lower():
+                        logger.debug(f"Found matching client: {client_info}")
                         user_uid = client_info.get('uid', '')
+                        logger.debug(f"Extracted UID: {user_uid}")
                         break
             
             # Fallback: Read from CSV if not in memory
+
+           
             if not user_uid:
+                logger.debug("Looking up UID in clients_reference.csv")
                 try:
                     log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
                     clients_ref_path = os.path.join(log_dir, 'clients_reference.csv')
-                    
+                    logger.debug(f"Checking for clients_reference.csv at: {clients_ref_path}")
                     if os.path.exists(clients_ref_path):
+                        logger.debug("Found clients_reference.csv, reading file")
                         with open(clients_ref_path, 'r', newline='', encoding='utf-8') as f:
                             reader = csv.DictReader(f)
                             for row in reader:
@@ -413,6 +423,7 @@ def process_command(bot, msg, nickname):
                     logger.debug(f"Could not read reference data: {ref_error}")
             
             if user_uid:
+                logger.debug(f"Registering user UID: {user_uid} for exp notifications")
                 return register_exp_user(user_uid)
             else:
                 return "Could not find your UID. Please wait a minute for data to refresh and try again."
