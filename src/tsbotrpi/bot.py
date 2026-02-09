@@ -1048,6 +1048,7 @@ class TS3Bot:
                             self.command_queue.put({'type': 'send_pokes'})
                     except Exception as e:
                         logger.error(f"Failed to reconnect main connection: {e}")
+                        time.sleep(10)
                         continue
                 
                 # Reconnect event connection if needed
@@ -1064,6 +1065,7 @@ class TS3Bot:
                             self._event_thread.start()
                     except Exception as e:
                         logger.error("Failed to reconnect event connection: %s", e)
+                        time.sleep(10)
                         continue
                 
                 # Send keepalive and check connection health
@@ -1084,7 +1086,6 @@ class TS3Bot:
                     else:
                         logger.error(f"Keepalive failed: {e}")
                         self.conn = None
-                
                 time.sleep(120)
         
         except KeyboardInterrupt:
