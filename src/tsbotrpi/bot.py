@@ -37,6 +37,10 @@ class TS3Bot:
         self.reference_manager = None
         self.users_seen_tracker = None
         self.human_readable_logger = None
+        
+        # Duplicate event prevention
+        self.last_event = None
+        self.last_event_timestamp = 0
 
     def setup_connection(self):
         """Setup TS3 ClientQuery connection."""
@@ -424,6 +428,19 @@ class TS3Bot:
                         continue
                     
                     event_data = event.parsed[0] if event.parsed else {}
+                    
+                    # Check for duplicate events within 1 second
+                    current_time = time.time()
+                    event_signature = (event_type, str(event_data))
+                    
+                    if (self.last_event == event_signature and 
+                        current_time - self.last_event_timestamp < 1.0):
+                        logger.debug(f"Ignoring duplicate event: {event_type}")
+                        continue
+                    
+                    # Update last event tracking
+                    self.last_event = event_signature
+                    self.last_event_timestamp = current_time
                     
                     # Only process commands for text messages
                     if event_type == "notifytextmessage":

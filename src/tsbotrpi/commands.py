@@ -105,16 +105,16 @@ def get_recent_logs(minutes: int, max_results: int = 100):
             return f"No activity found in the last {minutes} minute(s)."
         
         # Format results
-        result = f"Activity from last {minutes} minute(s) ({len(matches)} events):\\n"
-        result += "=" * 50 + "\\n\\n"
+        result = f"Activity from last {minutes} minute(s) ({len(matches)} events):\n"
+        result += "=" * 50 + "\n\n"
         
         for i, match in enumerate(matches, 1):
             timestamp = match.get('TIMESTAMP', '')
             uid = match.get('UID', '')[:12] + '...' if match.get('UID', '') else 'N/A'
             event = match.get('EVENT', 'unknown event')
             
-            result += f"{i}. [{timestamp}] {uid}\\n"
-            result += f"   {event}\\n\\n"
+            result += f"{i}. [{timestamp}] {uid}\n"
+            result += f"   {event}\n\n"
         
         if len(matches) == max_results:
             result += f"(Showing first {max_results} results)"
@@ -213,15 +213,15 @@ def search_activity_log(search_term: str, max_results: int = 15):
                 nickname, ip = matched_user_info[uid]
                 user_display = f"{nickname} ({uid[:8]}...)"
         
-        result = f"Found {len(matches)} activities for '{user_display}':\\n"
+        result = f"Found {len(matches)} activities for '{user_display}':\n"
         for i, match in enumerate(matches, 1):
             timestamp = match.get('TIMESTAMP', '')
             event = match.get('EVENT', 'unknown event')
             
-            result += f"{i}. [{timestamp}] {event}\\n"
+            result += f"{i}. [{timestamp}] {event}\n"
         
         if len(matches) == max_results:
-            result += f"\\n(Showing first {max_results} results)"
+            result += f"\n(Showing first {max_results} results)"
         
         return result
         
