@@ -172,8 +172,12 @@ class TS3Bot:
         conn = ts3.query.TS3ClientConnection(self.host)
         conn.auth(apikey=self.api_key)
         conn.use()
-        # Register for ALL notifications
-        conn.clientnotifyregister(event="any", schandlerid=1)
+        # Register only for events the bot actually uses
+        conn.clientnotifyregister(event="notifycliententerview", schandlerid=1)
+        conn.clientnotifyregister(event="notifyclientleftview", schandlerid=1)
+        conn.clientnotifyregister(event="notifyclientmoved", schandlerid=1)
+        conn.clientnotifyregister(event="notifyclientupdated", schandlerid=1)
+        conn.clientnotifyregister(event="notifytextmessage", schandlerid=1)
         
         # Connect to server if address is configured
         if self.server_address:
