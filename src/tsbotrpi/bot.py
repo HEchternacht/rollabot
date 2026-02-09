@@ -30,9 +30,10 @@ class TS3Bot:
         self.server_address = server_address
         self.nickname = nickname
         self.process_manager = process_manager
-        self.conn = None  # Main connection for commands, keepalive, reference data
+        self.conn = None  # Main connection for commands, keepalive
         self.event_conn = None  # Dedicated connection for event loop
         self.worker_conn = None  # Dedicated connection for worker thread responses
+        self.reference_conn = None  # Dedicated connection for reference data loop
         self._event_thread = None
         self._reference_thread = None
         self._worker_thread = None
@@ -173,6 +174,22 @@ class TS3Bot:
         conn.use()
         # Register for ALL notifications
         conn.clientnotifyregister(event="any", schandlerid=1)
+        
+        # Connect to server if address is configured
+        if self.server_address:
+            try:
+                conn.send(f"connect address={self.server_address} nickname={self.nickname}")
+            except Exception as e:
+                # Ignore "already connected" error
+                pass
+        
+        return conn
+
+    def setup_reference_connection(self):
+        """Setup dedicated TS3 ClientQuery connection for reference data loop."""
+        conn = ts3.query.TS3ClientConnection(self.host)
+        conn.auth(apikey=self.api_key)
+        conn.use()
         
         # Connect to server if address is configured
         if self.server_address:
@@ -361,23 +378,20 @@ class TS3Bot:
         """Thread that collects reference data every minute."""
         logger.info("Reference data collection thread started")
         
+        
         while self._running:
             time.sleep(60)  # Wait 1 minute
             
-            if not self.conn or not self.conn.is_connected():
+            if not self.reference_conn or not self.reference_conn.is_connected():
                 continue
             
             try:
                 # Fetch clientlist with all details
-                result = self.conn.clientlist(
+                result = self.reference_conn.clientlist(
                     uid=True, 
                     away=True, 
-                    voice=True, 
-                    times=True, 
-                    groups=True, 
-                    info=True, 
-                    country=True, 
-                    ip=True
+
+    
                 )
                 
                 if result.parsed:
@@ -401,7 +415,7 @@ class TS3Bot:
                     logger.debug(f"Updated reference data with {len(clients)} clients")
                 
                 # Fetch channellist
-                channel_result = self.conn.channellist()
+                channel_result = self.reference_conn.channellist()
                 if channel_result.parsed:
                     channels = []
                     for channel in channel_result.parsed:
@@ -428,10 +442,8 @@ class TS3Bot:
                 # Check for connection errors (including error 1794 - not connected)
                 if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
                     logger.warning(f"Reference data collection connection error: {e}")
-                    # Mark all connections as broken for full reconnection
-                    self.conn = None
-                    self.event_conn = None
-                    self.worker_conn = None
+                    # Mark reference connection as broken for reconnection
+                    self.reference_conn = None
                     time.sleep(5)
                 else:
                     logger.error(f"Error in reference data collection: {e}", exc_info=True)
@@ -1018,6 +1030,13 @@ class TS3Bot:
         except Exception as e:
             logger.error("Failed to establish worker connection: %s", e)
         
+        # Create dedicated connection for reference data loop
+        try:
+            self.reference_conn = self.setup_reference_connection()
+            logger.info("Reference connection established")
+        except Exception as e:
+            logger.error("Failed to establish reference connection: %s", e)
+        
         logger.info("Setting up event loop thread...")
         self._event_thread = threading.Thread(target=self._event_loop, daemon=True)
         self._event_thread.start()
@@ -1083,15 +1102,34 @@ class TS3Bot:
                         time.sleep(2)
                         continue
                 
+                # Reconnect reference connection if needed
+                if self.reference_conn is None or not self.reference_conn.is_connected():
+                    try:
+                        logger.info("Reference connection not available, attempting to reconnect...")
+                        self.reference_conn = self.setup_reference_connection()
+                        logger.info("Reference connection re-established")
+                        
+                        # Restart reference thread if not running
+                        if not self._reference_thread or not self._reference_thread.is_alive():
+                            logger.info("Restarting reference data thread...")
+                            self._reference_thread = threading.Thread(target=self._reference_data_loop, daemon=True)
+                            self._reference_thread.start()
+                    except Exception as e:
+                        logger.error("Failed to reconnect reference connection: %s", e)
+                        time.sleep(2)
+                        continue
+                
                 # Send keepalive and check connection health
                 try:
                     self.conn.send_keepalive()
                     self.event_conn.send_keepalive()
                     self.worker_conn.send_keepalive()
+                    self.reference_conn.send_keepalive()
                     # Ensure all connections are still connected to the server
                     self._ensure_server_connection(self.conn, "Main connection")
                     self._ensure_server_connection(self.event_conn, "Event connection")
                     self._ensure_server_connection(self.worker_conn, "Worker connection")
+                    self._ensure_server_connection(self.reference_conn, "Reference connection")
                 except Exception as e:
                     error_str = str(e).lower()
                     if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
@@ -1132,6 +1170,11 @@ class TS3Bot:
                     self.worker_conn.close()
                 except Exception as e:
                     logger.error(f"Error closing worker connection: {e}")
+            if self.reference_conn:
+                try:
+                    self.reference_conn.close()
+                except Exception as e:
+                    logger.error(f"Error closing reference connection: {e}")
             if self.conn:
                 try:
                     self.conn.close()
