@@ -5,7 +5,13 @@ import os
 import ts3
 
 from .commands import process_command
-from .activity_logger import ActivityLogger, ClientListLogger
+from .activity_logger import (
+    ActivityLogger, 
+    ClientListLogger, 
+    ReferenceDataManager, 
+    UsersSeenTracker, 
+    HumanReadableActivityLogger
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +27,16 @@ class TS3Bot:
         self.process_manager = process_manager
         self.conn = None
         self._event_thread = None
+        self._reference_thread = None
         self._running = False
         self.client_map = {}  # Maps clid -> {nickname, uid, ip}
         self.activity_logger = None
         self.clients_logger_initialized = False
+        
+        # New components
+        self.reference_manager = None
+        self.users_seen_tracker = None
+        self.human_readable_logger = None
 
     def setup_connection(self):
         """Setup TS3 ClientQuery connection."""
@@ -49,16 +61,36 @@ class TS3Bot:
         
         #logger.info("Connected to ClientQuery at %s", self.host)
         
-        # Initialize activity logger on first successful connection
+        # Initialize logging components on first successful connection
         if not self.activity_logger:
             try:
                 log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                
+                # Old activity logger (kept for backward compatibility)
                 activity_log_path = os.path.join(log_dir, 'activities_log.csv')
                 self.activity_logger = ActivityLogger(activity_log_path)
                 self.activity_logger.cleanup_old_entries(days=30)
-                logger.info("Activity logger initialized")
+                
+                # Reference data manager
+                clients_ref_path = os.path.join(log_dir, 'clients_reference.csv')
+                channels_ref_path = os.path.join(log_dir, 'channels_reference.csv')
+                self.reference_manager = ReferenceDataManager(clients_ref_path, channels_ref_path)
+                
+                # Users seen tracker
+                users_seen_path = os.path.join(log_dir, 'users_seen.csv')
+                self.users_seen_tracker = UsersSeenTracker(users_seen_path)
+                
+                # Human-readable activity logger
+                human_log_path = os.path.join(log_dir, 'activity_log_readable.csv')
+                self.human_readable_logger = HumanReadableActivityLogger(
+                    human_log_path, 
+                    self.reference_manager
+                )
+                self.human_readable_logger.cleanup_old_entries(days=30)
+                
+                logger.info("All logging components initialized")
             except Exception as e:
-                logger.error(f"Failed to initialize activity logger: {e}")
+                logger.error(f"Failed to initialize logging components: {e}")
         
         # Fetch and log current client list on startup
         if not self.clients_logger_initialized:
@@ -187,6 +219,70 @@ class TS3Bot:
         except Exception as e:
             logger.error(f"Failed to fetch/log client list: {e}")
     
+    def _reference_data_loop(self):
+        """Thread that collects reference data every minute."""
+        logger.info("Reference data collection thread started")
+        
+        while self._running:
+            time.sleep(60)  # Wait 1 minute
+            
+            if not self.conn or not self.conn.is_connected():
+                continue
+            
+            try:
+                # Fetch clientlist with all details
+                result = self.conn.clientlist(
+                    uid=True, 
+                    away=True, 
+                    voice=True, 
+                    times=True, 
+                    groups=True, 
+                    info=True, 
+                    country=True, 
+                    ip=True
+                )
+                
+                if result.parsed:
+                    clients = []
+                    for client in result.parsed:
+                        clients.append({
+                            'clid': client.get('clid', ''),
+                            'client_nickname': client.get('client_nickname', ''),
+                            'client_unique_identifier': client.get('client_unique_identifier', ''),
+                            'connection_client_ip': client.get('connection_client_ip', '')
+                        })
+                    
+                    # Update reference manager
+                    if self.reference_manager:
+                        self.reference_manager.update_clients(clients)
+                    
+                    # Update users seen tracker
+                    if self.users_seen_tracker:
+                        self.users_seen_tracker.add_users(clients)
+                    
+                    logger.debug(f"Updated reference data with {len(clients)} clients")
+                
+                # Fetch channellist
+                channel_result = self.conn.channellist()
+                if channel_result.parsed:
+                    channels = []
+                    for channel in channel_result.parsed:
+                        channels.append({
+                            'cid': channel.get('cid', ''),
+                            'channel_name': channel.get('channel_name', '')
+                        })
+                    
+                    # Update reference manager
+                    if self.reference_manager:
+                        self.reference_manager.update_channels(channels)
+                    
+                    logger.debug(f"Updated reference data with {len(channels)} channels")
+                
+            except Exception as e:
+                logger.error(f"Error in reference data collection: {e}")
+        
+        logger.info("Reference data collection thread stopped")
+    
     def _update_client_map(self, clid: str, data: dict):
         """Update client map with new data."""
         try:
@@ -200,6 +296,16 @@ class TS3Bot:
                 self.client_map[clid]['uid'] = data['client_unique_identifier']
             if 'connection_client_ip' in data:
                 self.client_map[clid]['ip'] = data['connection_client_ip']
+            
+            # Also update reference manager
+            if self.reference_manager:
+                client_data = [{
+                    'clid': clid,
+                    'client_nickname': self.client_map[clid]['nickname'],
+                    'client_unique_identifier': self.client_map[clid]['uid'],
+                    'connection_client_ip': self.client_map[clid]['ip']
+                }]
+                self.reference_manager.update_clients(client_data)
                 
         except Exception as e:
             logger.error(f"Error updating client map: {e}")
@@ -211,11 +317,14 @@ class TS3Bot:
     def _log_activity(self, event_type: str, clid: str, details: dict):
         """Log activity to CSV."""
         try:
-            if not self.activity_logger:
-                return
+            # Log to old format (backward compatibility)
+            if self.activity_logger:
+                client_info = self._get_client_info(clid)
+                self.activity_logger.log_event(event_type, clid, client_info, details)
             
-            client_info = self._get_client_info(clid)
-            self.activity_logger.log_event(event_type, clid, client_info, details)
+            # Log to new human-readable format
+            if self.human_readable_logger:
+                self.human_readable_logger.log_event(clid, event_type, details)
             
         except Exception as e:
             logger.error(f"Error logging activity: {e}")
@@ -327,9 +436,15 @@ class TS3Bot:
         logger.info("Starting bot...")
         self._running = True
         logger.info("Setting up event loop thread...")
-        self._event_thread=threading.Thread(target=self._event_loop, daemon=True)
+        self._event_thread = threading.Thread(target=self._event_loop, daemon=True)
         self._event_thread.start()
         logger.info("Event thread started")
+        
+        # Start reference data collection thread
+        logger.info("Setting up reference data collection thread...")
+        self._reference_thread = threading.Thread(target=self._reference_data_loop, daemon=True)
+        self._reference_thread.start()
+        logger.info("Reference data collection thread started")
 
         try:
             while self._running:
@@ -351,8 +466,8 @@ class TS3Bot:
                 
                 # Send keepalive and check connection health
                 try:
-                    if self.conn and self.conn.is_connected():
-                        self.conn.send_keepalive()
+        
+                    self.conn.send_keepalive()
                 except Exception as e:
                     logger.error("Keepalive failed: %s", e)
                     self.conn = None
@@ -364,10 +479,17 @@ class TS3Bot:
             self._running = False
             if self._event_thread:
                 self._event_thread.join(timeout=5)
+            if self._reference_thread:
+                self._reference_thread.join(timeout=5)
             if self.activity_logger:
                 try:
                     self.activity_logger.close()
                 except Exception as e:
                     logger.error(f"Error closing activity logger: {e}")
+            if self.human_readable_logger:
+                try:
+                    self.human_readable_logger.close()
+                except Exception as e:
+                    logger.error(f"Error closing human-readable logger: {e}")
             logger.info("Bot stopped")
             
