@@ -385,14 +385,33 @@ def process_command(bot, msg, nickname):
     
     # Register for guild exp notifications
     if msg.startswith("!registerexp"):
-        # Get user UID from bot
+        # Get user UID from reference data first, fallback to live data
         try:
-            clid = bot.conn.clientlist().parsed
             user_uid = None
-            for client in clid:
-                if client.get('client_nickname') == nickname:
-                    user_uid = client.get('client_unique_identifier', '')
-                    break
+            
+            # Try to find in reference data first
+            if hasattr(bot, 'reference_manager') and bot.reference_manager:
+                try:
+                    log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                    clients_ref_path = os.path.join(log_dir, 'clients_reference.csv')
+                    
+                    if os.path.exists(clients_ref_path):
+                        with open(clients_ref_path, 'r', newline='', encoding='utf-8') as f:
+                            reader = csv.DictReader(f)
+                            for row in reader:
+                                if row.get('nickname', '').lower() == nickname.lower():
+                                    user_uid = row.get('uid', '')
+                                    break
+                except Exception as ref_error:
+                    logger.debug(f"Could not read reference data: {ref_error}")
+            
+            # Fallback to live clientlist if not found in reference
+            if not user_uid:
+                clid = bot.conn.clientlist().parsed
+                for client in clid:
+                    if client.get('client_nickname', '').lower() == nickname.lower():
+                        user_uid = client.get('client_unique_identifier', '')
+                        break
             
             if user_uid:
                 return register_exp_user(user_uid)
@@ -404,14 +423,33 @@ def process_command(bot, msg, nickname):
     
     # Unregister from guild exp notifications
     if msg.startswith("!unregisterexp"):
-        # Get user UID from bot
+        # Get user UID from reference data first, fallback to live data
         try:
-            clid = bot.conn.clientlist().parsed
             user_uid = None
-            for client in clid:
-                if client.get('client_nickname') == nickname:
-                    user_uid = client.get('client_unique_identifier', '')
-                    break
+            
+            # Try to find in reference data first
+            if hasattr(bot, 'reference_manager') and bot.reference_manager:
+                try:
+                    log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                    clients_ref_path = os.path.join(log_dir, 'clients_reference.csv')
+                    
+                    if os.path.exists(clients_ref_path):
+                        with open(clients_ref_path, 'r', newline='', encoding='utf-8') as f:
+                            reader = csv.DictReader(f)
+                            for row in reader:
+                                if row.get('nickname', '').lower() == nickname.lower():
+                                    user_uid = row.get('uid', '')
+                                    break
+                except Exception as ref_error:
+                    logger.debug(f"Could not read reference data: {ref_error}")
+            
+            # Fallback to live clientlist if not found in reference
+            if not user_uid:
+                clid = bot.conn.clientlist().parsed
+                for client in clid:
+                    if client.get('client_nickname', '').lower() == nickname.lower():
+                        user_uid = client.get('client_unique_identifier', '')
+                        break
             
             if user_uid:
                 return unregister_exp_user(user_uid)
