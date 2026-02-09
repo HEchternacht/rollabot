@@ -159,7 +159,8 @@ class TS3Bot:
                     human_log_path, 
                     self.reference_manager
                 )
-                self.human_readable_logger.cleanup_old_entries(days=30)
+                
+                #self.human_readable_logger.cleanup_old_entries(days=30)
                 
                 logger.info("All logging components initialized")
             except Exception as e:
@@ -228,23 +229,19 @@ class TS3Bot:
                 logger.info("TS client process is running (PID %s), attempting reconnection", pid)
         
         # If TS is running, try reconnecting multiple times before restarting
-        last_attempt_time = 0
         if ts_is_running:
-            if last_attempt_time == 0 or time.time() - last_attempt_time > 20:
-                pass
-            else:
-                for attempt in range(1, 4):  # 3 attempts
-                    try:
-                        logger.info("Reconnection attempt %d/3...", attempt)
-                        self.conn = self.setup_connection()
-                        last_attempt_time = time.time()
-                        logger.info("Reconnected successfully on attempt %d", attempt)
-                        return
-                    except Exception as e:
-                        logger.error("Reconnection attempt %d failed: %s", attempt, e)
-                        if attempt < 3:
-                            logger.info("Waiting 20s before next attempt...")
-                            last_attempt_time = time.time()
+            for attempt in range(1, 4):  # 3 attempts
+                try:
+                    logger.info("Reconnection attempt %d/3...", attempt)
+                    self.conn = self.setup_connection()
+                    logger.info("Reconnected successfully on attempt %d", attempt)
+                    return
+                except Exception as e:
+                    logger.error("Reconnection attempt %d failed: %s", attempt, e)
+                    if attempt < 3:
+                        logger.info("Waiting 20s before next attempt...")
+                        time.sleep(5)
+                
                 
             # All reconnection attempts failed
             logger.warning("All 3 reconnection attempts failed, will restart TS client")
@@ -1134,7 +1131,7 @@ class TS3Bot:
                     try:
                         last_conn_reconnect_time = time.time()
                         logger.info("Main connection not available, attempting to reconnect...")
-                        self.conn = self.setup_connection()
+                        self.conn = self._reconnect()
                         logger.info("Main connection re-established")
                         # Queue pending pokes for sending after reconnection
                         if self.pending_pokes:
