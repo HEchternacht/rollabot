@@ -432,9 +432,27 @@ class TS3Bot:
             url = f"/api/guild-exp?guild={encodeURIComponent(guild)}&world={encodeURIComponent(world)}&only_online={1 if only_online else 0}"
             
             # Make request
-            response = requests.get(base_url + url, timeout=10)
-            if response.status_code != 200:
-                logger.warning(f"Guild exp API returned status {response.status_code}")
+
+            response = None
+            for attempt in range(1, 4):  # 3 attempts
+                try:
+                    timeout = 2 ** attempt  # Exponential: 2, 4, 8 seconds
+                    response = requests.get(base_url + url, timeout=timeout)
+                    if response.status_code == 200:
+                        break
+                    elif attempt < 3:
+                        logger.debug(f"Guild exp API returned status {response.status_code}, retrying...")
+                    else:
+                        logger.warning(f"Guild exp API returned status {response.status_code}")
+                        return
+                except requests.RequestException as e:
+                    if attempt < 3:
+                        logger.debug(f"Guild exp API request failed (attempt {attempt}/3): {e}")
+                    else:
+                        logger.warning(f"Guild exp API request failed after 3 attempts: {e}")
+                        return
+            
+            if response is None:
                 return
             
             data = response.json()
