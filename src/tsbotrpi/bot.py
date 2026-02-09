@@ -998,10 +998,8 @@ class TS3Bot:
             try:
                 # Get item from queue (blocking with timeout)
                 try:
-                    queue_start = time.perf_counter()
-                    item = self.command_queue.get(timeout=1)
-                    queue_wait = (time.perf_counter() - queue_start) * 1000
-                    logger.debug(f"⏱️ Queue wait time: {queue_wait:.2f}ms")
+                    item = self.command_queue.get()
+       
                 except:
                     # Timeout - no item in queue
                     continue
