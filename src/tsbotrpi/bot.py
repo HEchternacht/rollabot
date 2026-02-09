@@ -8,6 +8,7 @@ from urllib.parse import quote as encodeURIComponent
 import requests
 from queue import Queue
 from collections import deque
+from functools import wraps
 
 from .commands import process_command
 from .activity_logger import (
@@ -19,6 +20,23 @@ from .activity_logger import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def timed(func):
+    """Decorator to time and log function execution."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.perf_counter()
+        try:
+            result = func(*args, **kwargs)
+            elapsed = (time.perf_counter() - start_time) * 1000
+            logger.debug(f"⏱️ {func.__name__} completed in {elapsed:.2f}ms")
+            return result
+        except Exception as e:
+            elapsed = (time.perf_counter() - start_time) * 1000
+            logger.debug(f"⏱️ {func.__name__} failed after {elapsed:.2f}ms: {e}")
+            raise
+    return wrapper
 
 
 class TS3Bot:
@@ -57,6 +75,7 @@ class TS3Bot:
         # Pending pokes queue for reliable delivery
         self.pending_pokes = deque()  # Each item: {'message': str, 'target_uids': set, 'timestamp': float}
 
+    @timed
     def _ensure_server_connection(self, conn=None, conn_name="connection"):
         """Check if connected to server and reconnect if needed."""
         if conn is None:
@@ -89,6 +108,7 @@ class TS3Bot:
                 if "1796" not in str(e2):
                     logger.debug(f"{conn_name} server connection check/reconnect failed: {e2}")
 
+    @timed
     def setup_connection(self):
         """Setup TS3 ClientQuery connection for commands and operations."""
         conn = ts3.query.TS3ClientConnection(self.host)
@@ -155,6 +175,7 @@ class TS3Bot:
 
 
 
+    @timed
     def setup_event_connection(self):
         """Setup dedicated TS3 ClientQuery connection for event loop."""
         conn = ts3.query.TS3ClientConnection(self.host)
@@ -289,6 +310,7 @@ class TS3Bot:
         for client in clients:
             self.conn.clientpoke(msg=msg, clid=client["clid"])
     
+    @timed
     def _fetch_and_log_clientlist(self, conn):
         """Fetch current client list and log to CSV, update client_map."""
         try:
@@ -328,6 +350,7 @@ class TS3Bot:
         except Exception as e:
             logger.error(f"Failed to fetch/log client list: {e}")
     
+    @timed
     def _fetch_and_update_channels(self, conn):
         """Fetch current channel list and update reference data."""
         try:
@@ -377,11 +400,15 @@ class TS3Bot:
         
         logger.info("Reference data collection thread stopped")
     
+    @timed
     def _do_reference_update(self):
         """Perform reference data update (called from worker thread with lock)."""
         try:
             # Fetch clientlist with all details
+            clientlist_start = time.perf_counter()
             result = self.conn.clientlist(uid=True, away=True)
+            clientlist_time = (time.perf_counter() - clientlist_start) * 1000
+            logger.debug(f"⏱️ Reference clientlist query: {clientlist_time:.2f}ms")
             
             if result.parsed:
                 clients = []
@@ -394,17 +421,23 @@ class TS3Bot:
                     })
                 
                 # Update reference manager
+                update_start = time.perf_counter()
                 if self.reference_manager:
                     self.reference_manager.update_clients(clients)
                 
                 # Update users seen tracker
                 if self.users_seen_tracker:
                     self.users_seen_tracker.add_users(clients)
+                update_time = (time.perf_counter() - update_start) * 1000
+                logger.debug(f"⏱️ Update reference managers: {update_time:.2f}ms")
                 
                 logger.debug(f"Updated reference data with {len(clients)} clients")
             
             # Fetch channellist
+            channellist_start = time.perf_counter()
             channel_result = self.conn.channellist()
+            channellist_time = (time.perf_counter() - channellist_start) * 1000
+            logger.debug(f"⏱️ Reference channellist query: {channellist_time:.2f}ms")
             if channel_result.parsed:
                 channels = []
                 for channel in channel_result.parsed:
@@ -427,6 +460,7 @@ class TS3Bot:
             else:
                 logger.error(f"Error in reference data collection: {e}", exc_info=True)
     
+    @timed
     def _check_guild_exp(self):
         """Check guild exp API and notify registered users of gains."""
         try:
@@ -440,7 +474,7 @@ class TS3Bot:
             url = f"/api/guild-exp?guild={encodeURIComponent(guild)}&world={encodeURIComponent(world)}&only_online={1 if only_online else 0}"
             
             # Make request
-
+            api_start = time.perf_counter()
             response = None
             for attempt in range(1, 4):  # 3 attempts
                 try:
@@ -459,6 +493,9 @@ class TS3Bot:
                     else:
                         logger.warning(f"Guild exp API request failed after 3 attempts: {e}")
                         return
+            
+            api_time = (time.perf_counter() - api_start) * 1000
+            logger.debug(f"⏱️ Guild exp API call (with retries): {api_time:.2f}ms")
             
             if response is None:
                 return
@@ -512,8 +549,11 @@ class TS3Bot:
                 logger.debug("No registered users for guild exp notifications")
                 return
             
+            read_start = time.perf_counter()
             with open(registered_file, 'r', encoding='utf-8') as f:
                 registered_uids = set(line.strip() for line in f if line.strip())
+            read_time = (time.perf_counter() - read_start) * 1000
+            logger.debug(f"⏱️ Read registered.txt: {read_time:.2f}ms")
             
             if not registered_uids:
                 logger.debug("No registered users for guild exp notifications")
@@ -660,6 +700,7 @@ class TS3Bot:
         if self.pending_pokes:
             self.command_queue.put({'type': 'send_pokes'})
     
+    @timed
     def _do_send_pokes(self):
         """Send all pending pokes to registered users who are online (called from worker with lock)."""
         if not self.pending_pokes:
@@ -667,7 +708,10 @@ class TS3Bot:
         
         # Get current online clients
         try:
+            clientlist_start = time.perf_counter()
             clients = self.conn.clientlist(uid=True).parsed
+            clientlist_time = (time.perf_counter() - clientlist_start) * 1000
+            logger.debug(f"⏱️ Clientlist query: {clientlist_time:.2f}ms")
         except Exception as e:
             error_str = str(e).lower()
             if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
@@ -709,7 +753,10 @@ class TS3Bot:
                 nickname = uid_to_clid[target_uid]['nickname']
                 
                 try:
+                    poke_start = time.perf_counter()
                     self.conn.clientpoke(clid=clid, msg=message)
+                    poke_time = (time.perf_counter() - poke_start) * 1000
+                    logger.debug(f"⏱️ Clientpoke: {poke_time:.2f}ms")
                     successfully_poked.add(target_uid)
                     total_sent += 1
                     logger.debug(f"Poked {nickname} with pending message")
@@ -754,6 +801,7 @@ class TS3Bot:
         if total_sent > 0:
             logger.info(f"Sent {total_sent} pending poke notifications ({len(self.pending_pokes)} pokes still queued)")
     
+    @timed
     def _update_client_map(self, clid: str, data: dict):
         """Update client map with new data."""
         try:
@@ -785,6 +833,7 @@ class TS3Bot:
         """Get client info from map, return empty dict if not found."""
         return self.client_map.get(clid, {'nickname': '', 'uid': '', 'ip': ''})
     
+    @timed
     def _log_activity(self, event_type: str, clid: str, details: dict):
         """Log activity to CSV."""
         try:
@@ -800,6 +849,7 @@ class TS3Bot:
         except Exception as e:
             logger.error(f"Error logging activity: {e}")
     
+    @timed
     def _handle_event(self, event_type: str, event_data: dict):
         """Route events to appropriate handlers."""
         try:
@@ -862,10 +912,14 @@ class TS3Bot:
             
             try:
                 # Wait for events (no timeout - blocking call)
+                wait_start = time.perf_counter()
                 event = self.event_conn.wait_for_event()
+                wait_time = (time.perf_counter() - wait_start) * 1000
+                logger.debug(f"⏱️ Event wait time: {wait_time:.2f}ms")
 
                     
                 if event and event.parsed and event._data and len(event._data) > 0:
+                    parse_start = time.perf_counter()
                     # Flatten event data by splitting on pipe delimiter
                     split_data = event._data[0].split(b'|')
                     
@@ -903,7 +957,10 @@ class TS3Bot:
                             else:
                                 # Enqueue command for worker thread to process
                                 try:
+                                    enqueue_start = time.perf_counter()
                                     self.command_queue.put((msg, clid, nickname))
+                                    enqueue_time = (time.perf_counter() - enqueue_start) * 1000
+                                    logger.debug(f"⏱️ Queue enqueue: {enqueue_time:.2f}ms")
                                     logger.debug(f"Enqueued command from {nickname}: {msg[:20]}...")
                                 except Exception as e:
                                     logger.error("Error enqueueing command: %s", e)
@@ -913,6 +970,9 @@ class TS3Bot:
                                 self._handle_event(event_type, event_data)
                             except Exception as e:
                                 logger.error(f"Error handling event {event_type}: {e}")
+                    
+                    parse_time = (time.perf_counter() - parse_start) * 1000
+                    logger.debug(f"⏱️ Event parsing: {parse_time:.2f}ms")
             
             except ts3.query.TS3TimeoutError:
                 # Should not happen without timeout, but handle anyway
@@ -941,7 +1001,10 @@ class TS3Bot:
             try:
                 # Get item from queue (blocking with timeout)
                 try:
+                    queue_start = time.perf_counter()
                     item = self.command_queue.get(timeout=1)
+                    queue_wait = (time.perf_counter() - queue_start) * 1000
+                    logger.debug(f"⏱️ Queue wait time: {queue_wait:.2f}ms")
                 except:
                     # Timeout - no item in queue
                     continue
@@ -956,14 +1019,23 @@ class TS3Bot:
                 
                 # Process different types of queue items
                 try:
+                    process_start = time.perf_counter()
+                    
                     if isinstance(item, tuple) and len(item) == 3:
                         # Command from user: (msg, clid, nickname)
                         msg, clid, nickname = item
                         logger.debug(f"Processing command from {nickname}: {msg[:20]}...")
                         
+                        cmd_start = time.perf_counter()
                         response = process_command(self, msg, nickname)
+                        cmd_time = (time.perf_counter() - cmd_start) * 1000
+                        logger.debug(f"⏱️ Command processing: {cmd_time:.2f}ms")
+                        
                         try:
+                            send_start = time.perf_counter()
                             self.conn.sendtextmessage(targetmode=1, target=clid, msg=response)
+                            send_time = (time.perf_counter() - send_start) * 1000
+                            logger.debug(f"⏱️ Send response: {send_time:.2f}ms")
                             logger.debug(f"Sent response to {nickname}")
                         except Exception as send_error:
                             error_str = str(send_error).lower()
@@ -987,6 +1059,9 @@ class TS3Bot:
                         # Guild exp check request
                         logger.debug("Processing guild exp check")
                         self._check_guild_exp()
+                    
+                    process_time = (time.perf_counter() - process_start) * 1000
+                    logger.debug(f"⏱️ Total item processing: {process_time:.2f}ms")
                         
                 except Exception as e:
                     logger.error(f"Error processing queue item: {e}", exc_info=True)
@@ -1057,6 +1132,7 @@ class TS3Bot:
                 # Reconnect main connection if needed
                 if self.conn is None or not self.conn.is_connected() and time.time() - last_conn_reconnect_time > 10:
                     try:
+                        last_conn_reconnect_time = time.time()
                         logger.info("Main connection not available, attempting to reconnect...")
                         self.conn = self.setup_connection()
                         logger.info("Main connection re-established")
@@ -1071,6 +1147,7 @@ class TS3Bot:
                 # Reconnect event connection if needed
                 if self.event_conn is None or not self.event_conn.is_connected() and time.time() - last_conn_event_reconnect_time > 10:
                     try:
+                        last_conn_event_reconnect_time = time.time()
                         logger.info("Event connection not available, attempting to reconnect...")
                         self.event_conn = self.setup_event_connection()
                         logger.info("Event connection re-established")
@@ -1089,12 +1166,14 @@ class TS3Bot:
                 if time.time() - last_keepalive_time > 120:
                     last_keepalive_time = time.time()
                     try:
-                        
+                        keepalive_start = time.perf_counter()
                         self.conn.send_keepalive()
                         self.event_conn.send_keepalive()
                         # Ensure connections are still connected to the server
                         self._ensure_server_connection(self.conn, "Main connection")
                         self._ensure_server_connection(self.event_conn, "Event connection")
+                        keepalive_time = (time.perf_counter() - keepalive_start) * 1000
+                        logger.debug(f"⏱️ Keepalive + connection checks: {keepalive_time:.2f}ms")
                     except Exception as e:
                         error_str = str(e).lower()
                         if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
