@@ -359,20 +359,21 @@ class TS3Bot:
         """Thread that queues reference data tasks every 3 minutes."""
         logger.info("Reference data collection thread started")
         
-        i = 0
+        last_reference_update = 0
+        last_guild_exp_check = 0
         while self._running:
-            time.sleep(180)  # Wait 3 minutes
             
-            if i % 5 == 0:
-                i = 0
-                # Queue reference data update
+            if time.time() - last_reference_update > 300:  # Every 5 minutes
+                last_reference_update = time.time()
                 self.command_queue.put({'type': 'reference_update'})
-            else:
-                i += 1
-            
+
+        
             # Always queue guild exp check and poke sending
-            self.command_queue.put({'type': 'guild_exp_check'})
-            self.command_queue.put({'type': 'send_pokes'})
+            if time.time() - last_guild_exp_check > 90:  # Every 1.5 minutes
+                last_guild_exp_check = time.time()
+                self.command_queue.put({'type': 'guild_exp_check'})
+                self.command_queue.put({'type': 'send_pokes'})
+            time.sleep(1)
         
         logger.info("Reference data collection thread stopped")
     
@@ -1035,10 +1036,26 @@ class TS3Bot:
         self._reference_thread.start()
         logger.info("Reference data collection thread started")
 
+
+
+
+        #make non blocking sleep
+
+
+
+        last_conn_reconnect_time = 0
+        last_conn_event_reconnect_time = 0
+
+
+        last_keepalive_time = 0
+
+
+
+
         try:
             while self._running:
                 # Reconnect main connection if needed
-                if self.conn is None or not self.conn.is_connected():
+                if self.conn is None or not self.conn.is_connected() and time.time() - last_conn_reconnect_time > 10:
                     try:
                         logger.info("Main connection not available, attempting to reconnect...")
                         self.conn = self.setup_connection()
@@ -1048,11 +1065,11 @@ class TS3Bot:
                             self.command_queue.put({'type': 'send_pokes'})
                     except Exception as e:
                         logger.error(f"Failed to reconnect main connection: {e}")
-                        time.sleep(10)
+                        last_conn_reconnect_time = time.time()
                         continue
                 
                 # Reconnect event connection if needed
-                if self.event_conn is None or not self.event_conn.is_connected():
+                if self.event_conn is None or not self.event_conn.is_connected() and time.time() - last_conn_event_reconnect_time > 10:
                     try:
                         logger.info("Event connection not available, attempting to reconnect...")
                         self.event_conn = self.setup_event_connection()
@@ -1065,28 +1082,30 @@ class TS3Bot:
                             self._event_thread.start()
                     except Exception as e:
                         logger.error("Failed to reconnect event connection: %s", e)
-                        time.sleep(10)
+                        last_conn_event_reconnect_time = time.time()
                         continue
                 
                 # Send keepalive and check connection health
-                try:
-                    last_keepalive = time.time()
-                    self.conn.send_keepalive()
-                    self.event_conn.send_keepalive()
-                    # Ensure connections are still connected to the server
-                    self._ensure_server_connection(self.conn, "Main connection")
-                    self._ensure_server_connection(self.event_conn, "Event connection")
-                except Exception as e:
-                    error_str = str(e).lower()
-                    if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
-                        logger.warning(f"Keepalive connection error: {e}")
-                        # Mark connections as broken
-                        self.conn = None
-                        self.event_conn = None
-                    else:
-                        logger.error(f"Keepalive failed: {e}")
-                        self.conn = None
-                time.sleep(120)
+                if time.time() - last_keepalive_time > 120:
+                    last_keepalive_time = time.time()
+                    try:
+                        
+                        self.conn.send_keepalive()
+                        self.event_conn.send_keepalive()
+                        # Ensure connections are still connected to the server
+                        self._ensure_server_connection(self.conn, "Main connection")
+                        self._ensure_server_connection(self.event_conn, "Event connection")
+                    except Exception as e:
+                        error_str = str(e).lower()
+                        if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
+                            logger.warning(f"Keepalive connection error: {e}")
+                            # Mark connections as broken
+                            self.conn = None
+                            self.event_conn = None
+                        else:
+                            logger.error(f"Keepalive failed: {e}")
+                            self.conn = None
+                time.sleep(1)
         
         except KeyboardInterrupt:
             logger.info("Bot shutdown requested")
