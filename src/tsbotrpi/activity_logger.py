@@ -237,6 +237,7 @@ class HumanReadableActivityLogger:
         self.reference_manager = reference_manager
         self.file_handle = None
         self.csv_writer = None
+        self.last_event_per_uid = {}  # Track last event type per UID to prevent duplicates
         
         try:
             file_exists = os.path.exists(csv_path)
@@ -273,6 +274,13 @@ class HumanReadableActivityLogger:
             uid = client_info.get('uid', '')
             nickname = client_info.get('nickname', 'Unknown')
             
+            # Skip duplicate connects without disconnect in between
+            if event_type == 'cliententerview':
+                last_event = self.last_event_per_uid.get(uid)
+                if last_event == 'cliententerview':
+                    logger.debug(f"Skipping duplicate connect for {uid} without disconnect")
+                    return
+            
             # Generate human-readable event description
             event_desc = self._format_event(event_type, nickname, event_data)
             
@@ -280,6 +288,9 @@ class HumanReadableActivityLogger:
             timestamp = datetime.now().strftime('%d/%m/%Y-%H:%M:%S')
             self.csv_writer.writerow([uid, timestamp, event_desc])
             self.file_handle.flush()
+            
+            # Track this event type for duplicate prevention
+            self.last_event_per_uid[uid] = event_type
             
             logger.debug(f"Logged: {uid} - {event_desc}")
             
