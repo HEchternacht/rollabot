@@ -6,6 +6,7 @@ import ts3
 from datetime import datetime
 from urllib.parse import quote as encodeURIComponent
 import requests
+from queue import Queue
 
 from .commands import process_command
 from .activity_logger import (
@@ -30,9 +31,12 @@ class TS3Bot:
         self.process_manager = process_manager
         self.conn = None  # Main connection for commands, keepalive, reference data
         self.event_conn = None  # Dedicated connection for event loop
+        self.worker_conn = None  # Dedicated connection for worker thread responses
         self._event_thread = None
         self._reference_thread = None
+        self._worker_thread = None
         self._running = False
+        self.command_queue = Queue()  # FIFO queue for command processing
         self.client_map = {}  # Maps clid -> {nickname, uid, ip}
         self.activity_logger = None
         self.clients_logger_initialized = False
@@ -135,6 +139,22 @@ class TS3Bot:
             self._fetch_and_log_clientlist(conn)
             self._fetch_and_update_channels(conn)
             self.clients_logger_initialized = True
+        
+        return conn
+
+    def setup_worker_connection(self):
+        """Setup dedicated TS3 ClientQuery connection for worker thread."""
+        conn = ts3.query.TS3ClientConnection(self.host)
+        conn.auth(apikey=self.api_key)
+        conn.use()
+        
+        # Connect to server if address is configured
+        if self.server_address:
+            try:
+                conn.send(f"connect address={self.server_address} nickname={self.nickname}")
+            except Exception as e:
+                # Ignore "already connected" error
+                pass
         
         return conn
 
@@ -608,13 +628,13 @@ class TS3Bot:
                 # Wait for events (no timeout - blocking call)
                 event = self.event_conn.wait_for_event()
 
-                if event.parsed and event._data and len(event._data) > 0:
+                if event and event.parsed and event._data and len(event._data) > 0:
                     # Extract event type from raw data
                     for i in range(len(event.parsed)):
                         try:
                             event_type = event._data[i].decode("utf-8").split()[0]
                         except (AttributeError, IndexError, UnicodeDecodeError) as e:
-                            logger.error(f"Failed to extract event type: {e}")
+                            logger.error(f"Failed to extract event type: {e}, event data: {event._data}")
                             continue
                         
                         event_data = event.parsed[i] if event.parsed else {}
@@ -642,12 +662,12 @@ class TS3Bot:
                             if "x3tBot" in nickname or "x3t" in nickname.lower() or nickname == self.nickname:
                                 logger.debug("Ignoring message from %s", nickname)
                             else:
-                                # Process and respond
+                                # Enqueue command for worker thread to process
                                 try:
-                                    response = process_command(self, msg, nickname)
-                                    self.conn.sendtextmessage(targetmode=1, target=clid, msg=response)
+                                    self.command_queue.put((msg, clid, nickname))
+                                    logger.debug(f"Enqueued command from {nickname}: {msg[:20]}...")
                                 except Exception as e:
-                                    logger.error("Error processing command: %s", e)
+                                    logger.error("Error enqueueing command: %s", e)
                         else:
                             # Route all other events to activity logger
                             try:
@@ -665,6 +685,43 @@ class TS3Bot:
                 time.sleep(1)
         
         logger.info("Event loop thread stopped")
+
+    def _worker_loop(self):
+        """Worker thread - processes commands from queue."""
+        logger.info("Worker loop thread started")
+        
+        while self._running:
+            try:
+                # Get command from queue (blocking with timeout)
+                try:
+                    msg, clid, nickname = self.command_queue.get(timeout=1)
+                except:
+                    # Timeout - no command in queue
+                    continue
+                
+                # Check if worker connection is available
+                if not self.worker_conn or not self.worker_conn.is_connected():
+                    logger.warning("Worker connection not available, dropping command")
+                    self.command_queue.task_done()
+                    continue
+                
+                # Process command and send response
+                try:
+                    logger.debug(f"Processing command from {nickname}: {msg[:20]}...")
+                    response = process_command(self, msg, nickname)
+                    self.worker_conn.sendtextmessage(targetmode=1, target=clid, msg=response)
+                    logger.debug(f"Sent response to {nickname}")
+                except Exception as e:
+                    logger.error("Error processing command in worker: %s", e)
+                finally:
+                    self.command_queue.task_done()
+                    
+            except Exception as e:
+                if self._running:
+                    logger.error("Error in worker loop: %s", e)
+                time.sleep(1)
+        
+        logger.info("Worker loop thread stopped")
 
     def run(self):
         """Main event loop."""
@@ -686,10 +743,22 @@ class TS3Bot:
         except Exception as e:
             logger.error("Failed to establish event connection: %s", e)
         
+        # Create dedicated connection for worker thread
+        try:
+            self.worker_conn = self.setup_worker_connection()
+            logger.info("Worker connection established")
+        except Exception as e:
+            logger.error("Failed to establish worker connection: %s", e)
+        
         logger.info("Setting up event loop thread...")
         self._event_thread = threading.Thread(target=self._event_loop, daemon=True)
         self._event_thread.start()
         logger.info("Event thread started")
+        
+        logger.info("Setting up worker thread...")
+        self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self._worker_thread.start()
+        logger.info("Worker thread started")
         
         # Start reference data collection thread
         logger.info("Setting up reference data collection thread...")
@@ -725,6 +794,22 @@ class TS3Bot:
                         time.sleep(2)
                         continue
                 
+                # Reconnect worker connection if needed
+                if self.worker_conn is None or not self.worker_conn.is_connected():
+                    try:
+                        self.worker_conn = self.setup_worker_connection()
+                        logger.info("Worker connection re-established")
+                        
+                        # Restart worker thread if not running
+                        if not self._worker_thread or not self._worker_thread.is_alive():
+                            logger.info("Restarting worker thread...")
+                            self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+                            self._worker_thread.start()
+                    except Exception as e:
+                        logger.error("Failed to reconnect worker connection: %s", e)
+                        time.sleep(2)
+                        continue
+                
                 # Send keepalive and check connection health
                 try:
                     self.conn.send_keepalive()
@@ -742,6 +827,8 @@ class TS3Bot:
             self._running = False
             if self._event_thread:
                 self._event_thread.join(timeout=5)
+            if self._worker_thread:
+                self._worker_thread.join(timeout=5)
             if self._reference_thread:
                 self._reference_thread.join(timeout=5)
             if self.event_conn:
@@ -749,6 +836,11 @@ class TS3Bot:
                     self.event_conn.close()
                 except Exception as e:
                     logger.error(f"Error closing event connection: {e}")
+            if self.worker_conn:
+                try:
+                    self.worker_conn.close()
+                except Exception as e:
+                    logger.error(f"Error closing worker connection: {e}")
             if self.conn:
                 try:
                     self.conn.close()
