@@ -293,6 +293,109 @@ def get_recent_logs(minutes: int, max_results: int = 100):
         return f"Error retrieving logs: {str(e)}"
 
 
+def get_registered_count():
+    """
+    Get the number of users registered for exp notifications.
+    
+    Returns:
+        str: Count message or error
+    """
+    try:
+        log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        registered_file = os.path.join(log_dir, 'registered.txt')
+        
+        if not os.path.exists(registered_file):
+            return "📋 No users registered for exp notifications."
+        
+        with open(registered_file, 'r', encoding='utf-8') as f:
+            count = len([line for line in f if line.strip()])
+        
+        return f"📋 Users registered for exp notifications: {count}"
+    except Exception as e:
+        logger.error(f"Error getting registered count: {e}")
+        return f"Error: {str(e)}"
+
+
+def get_bot_uptime(bot):
+    """
+    Get bot uptime.
+    
+    Args:
+        bot: TS3Bot instance
+    
+    Returns:
+        str: Uptime information
+    """
+    if hasattr(bot, 'start_time'):
+        uptime = datetime.now() - bot.start_time
+        days = uptime.days
+        hours, remainder = divmod(uptime.seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"⏱️ Bot uptime: {days}d {hours}h {minutes}m {seconds}s"
+    return "⏱️ Uptime information not available."
+
+
+def get_users_list():
+    """
+    Get list of all UIDs with their associated nicknames.
+    
+    Returns:
+        str: Formatted list of UIDs and nicknames
+    """
+    try:
+        log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        users_seen_path = os.path.join(log_dir, 'users_seen.csv')
+        clients_ref_path = os.path.join(log_dir, 'clients_reference.csv')
+        
+        # Dictionary to store uid -> set of nicknames
+        uid_nicknames = {}
+        
+        # Read from users_seen.csv (historical data)
+        if os.path.exists(users_seen_path):
+            with open(users_seen_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    uid = row.get('UID', '').strip()
+                    nickname = row.get('NICKNAME', '').strip()
+                    
+                    if uid and nickname:
+                        if uid not in uid_nicknames:
+                            uid_nicknames[uid] = set()
+                        uid_nicknames[uid].add(nickname)
+        
+        # Read from clients_reference.csv (current data)
+        if os.path.exists(clients_ref_path):
+            with open(clients_ref_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    uid = row.get('uid', '').strip()
+                    nickname = row.get('nickname', '').strip()
+                    
+                    if uid and nickname:
+                        if uid not in uid_nicknames:
+                            uid_nicknames[uid] = set()
+                        uid_nicknames[uid].add(nickname)
+        
+        if not uid_nicknames:
+            return "No user data available."
+        
+        # Format results
+        result = f"👥 Users List ({len(uid_nicknames)} unique UIDs):\n"
+        result += "=" * 50 + "\n\n"
+        
+        for uid, nicknames in sorted(uid_nicknames.items()):
+            # Truncate UID for display
+            uid_display = uid[:12] + '...' if len(uid) > 12 else uid
+            nicks_list = ','.join(sorted(nicknames))
+            result += f"{uid_display} > {nicks_list}\n"
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error getting users list: {e}")
+        return f"Error: {str(e)}"
+
+
 def search_activity_log(search_term: str, max_results: int = 15):
     """
     Search human-readable activity log for entries matching uid, nickname, or ip.
@@ -415,9 +518,11 @@ def process_command(bot, msg, nickname):
             "Available commands:\n"
             "!help - Show this message\n"
             "!mp <message> - Poka todo mundo , util se o x3tbot estiver offline\n"
-            "!snapshot - Get detailed client snapshot\n"
             "!logger <uid/nickname/ip> - Search activity log for user\n"
             "!lastminuteslogs <minutes> - Get activity from last N minutes\n"
+            "!users - List all UIDs with their associated nicknames\n"
+            "!registered - Show number of users registered for exp\n"
+            "!uptime - Show bot uptime\n"
             "!registerexp - Register for guild exp notifications\n"
             "!unregisterexp - Unregister from guild exp notifications\n"
             # "!registerfriendlyexp - Register for friendly guild exp notifications\n"  # Commented out
@@ -434,17 +539,17 @@ def process_command(bot, msg, nickname):
         return "Poking all clients..."
     
     # Add to hunted list (via x3tBot)#hide from help since it's x3tBot specific
-    if msg.startswith("!hunted add"):
-        target = msg[12:].strip()
-        return bot.add_hunted(target)
-    
-    # Get detailed client snapshot
-    if msg.startswith("!snapshot"):
-        snapshot = bot.conn.clientlist(
-            info=True, country=True, uid=True, ip=True,
-            groups=True, times=True, voice=True, away=True
-        ).parsed
-        return format_snapshot(snapshot)
+    #if msg.startswith("!hunted add"):
+    #    target = msg[12:].strip()
+    #    return bot.add_hunted(target)
+    #
+    ## Get detailed client snapshot
+    #if msg.startswith("!snapshot"):
+    #    snapshot = bot.conn.clientlist(
+    #        info=True, country=True, uid=True, ip=True,
+    #        groups=True, times=True, voice=True, away=True
+    #    ).parsed
+    #    return format_snapshot(snapshot)
     
     # Search activity log
     if msg.startswith("!logger"):
@@ -469,6 +574,18 @@ def process_command(bot, msg, nickname):
             return get_recent_logs(minutes)
         except ValueError:
             return "Invalid number. Usage: !lastminuteslogs <minutes>"
+    
+    # Get list of all users with their nicknames
+    if msg.startswith("!users"):
+        return get_users_list()
+    
+    # Get registered users count
+    if msg.startswith("!registered"):
+        return get_registered_count()
+    
+    # Get bot uptime
+    if msg.startswith("!uptime"):
+        return get_bot_uptime(bot)
     
     # Register for guild exp notifications
     if msg.startswith("!registerexp"):
