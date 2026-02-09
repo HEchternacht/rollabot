@@ -606,17 +606,18 @@ class TS3Bot:
             
             try:
                 # Wait for events (no timeout - blocking call)
-                events = self.event_conn.wait_for_event()
-                for event in events:
-                    if event.parsed and event._data and len(event._data) > 0:
-                        # Extract event type from raw data
+                event = self.event_conn.wait_for_event()
+
+                if event.parsed and event._data and len(event._data) > 0:
+                    # Extract event type from raw data
+                    for i in range(len(event.parsed)):
                         try:
-                            event_type = event._data[0].decode("utf-8").split()[0]
+                            event_type = event._data[i].decode("utf-8").split()[0]
                         except (AttributeError, IndexError, UnicodeDecodeError) as e:
                             logger.error(f"Failed to extract event type: {e}")
                             continue
                         
-                        event_data = event.parsed[0] if event.parsed else {}
+                        event_data = event.parsed[i] if event.parsed else {}
                         
                         # Check for duplicate events within 1 second
                         current_time = time.time()
