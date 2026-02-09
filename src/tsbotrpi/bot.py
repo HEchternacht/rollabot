@@ -99,6 +99,7 @@ class TS3Bot:
         if self.server_address:
             try:
                 conn.send(f"connect address={self.server_address} nickname={self.nickname}")
+                time.sleep(10)
                 #logger.info("Connected to server %s as %s", self.server_address, self.nickname)
             except Exception as e:
                 # Ignore "already connected" error (id 1796)
@@ -203,18 +204,24 @@ class TS3Bot:
                 logger.info("TS client process is running (PID %s), attempting reconnection", pid)
         
         # If TS is running, try reconnecting multiple times before restarting
+        last_attempt_time = 0
         if ts_is_running:
-            for attempt in range(1, 4):  # 3 attempts
-                try:
-                    logger.info("Reconnection attempt %d/3...", attempt)
-                    self.conn = self.setup_connection()
-                    logger.info("Reconnected successfully on attempt %d", attempt)
-                    return
-                except Exception as e:
-                    logger.error("Reconnection attempt %d failed: %s", attempt, e)
-                    if attempt < 3:
-                        logger.info("Waiting 20s before next attempt...")
-            
+            if last_attempt_time == 0 or time.time() - last_attempt_time > 20:
+                pass
+            else:
+                for attempt in range(1, 4):  # 3 attempts
+                    try:
+                        logger.info("Reconnection attempt %d/3...", attempt)
+                        self.conn = self.setup_connection()
+                        last_attempt_time = time.time()
+                        logger.info("Reconnected successfully on attempt %d", attempt)
+                        return
+                    except Exception as e:
+                        logger.error("Reconnection attempt %d failed: %s", attempt, e)
+                        if attempt < 3:
+                            logger.info("Waiting 20s before next attempt...")
+                            last_attempt_time = time.time()
+                
             # All reconnection attempts failed
             logger.warning("All 3 reconnection attempts failed, will restart TS client")
         
