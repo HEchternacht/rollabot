@@ -214,7 +214,6 @@ class TS3Bot:
                     logger.error("Reconnection attempt %d failed: %s", attempt, e)
                     if attempt < 3:
                         logger.info("Waiting 20s before next attempt...")
-                        time.sleep(20)
             
             # All reconnection attempts failed
             logger.warning("All 3 reconnection attempts failed, will restart TS client")
@@ -236,7 +235,6 @@ class TS3Bot:
                 # Wait less if restart was skipped due to cooldown
                 wait_time = 60 if restarted else 5
                 logger.info("Waiting %ds for TS client...", wait_time)
-                time.sleep(wait_time)
                 
                 # Try connecting again
                 try:
@@ -244,8 +242,7 @@ class TS3Bot:
                     logger.info("Connected after restarting TS client")
                 except Exception as e2:
                     logger.error("Still cannot connect: %s", e2)
-                    time.sleep(2)
-                    time.sleep(2)
+       
 
     def get_xbot(self):
         """Find x3tBot Auroria client."""
@@ -1041,7 +1038,6 @@ class TS3Bot:
                             self.command_queue.put({'type': 'send_pokes'})
                     except Exception as e:
                         logger.error(f"Failed to reconnect main connection: {e}")
-                        time.sleep(5)
                         continue
                 
                 # Reconnect event connection if needed
@@ -1058,7 +1054,6 @@ class TS3Bot:
                             self._event_thread.start()
                     except Exception as e:
                         logger.error("Failed to reconnect event connection: %s", e)
-                        time.sleep(2)
                         continue
                 
                 # Send keepalive and check connection health
@@ -1088,7 +1083,6 @@ class TS3Bot:
         except Exception as e:
             logger.critical(f"Critical error in main loop: {e}", exc_info=True)
             logger.info("Bot will attempt to continue...")
-            time.sleep(5)
         
         finally:
             # Cleanup
