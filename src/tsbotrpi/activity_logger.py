@@ -58,7 +58,7 @@ class ReferenceDataManager:
             with open(self.channels_csv, 'r', newline='', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    cid = row.get('cid', '')
+                    cid = str(row.get('cid', ''))
                     if cid:
                         self.channel_map[cid] = row.get('channel_name', '')
             logger.info(f"Loaded {len(self.channel_map)} channels from reference data")
@@ -114,7 +114,7 @@ class ReferenceDataManager:
         try:
             # Update in-memory map
             for channel in channels:
-                cid = channel.get('cid', '')
+                cid = str(channel.get('cid', ''))
                 if cid:
                     self.channel_map[cid] = channel.get('channel_name', '')
             
@@ -138,7 +138,14 @@ class ReferenceDataManager:
     
     def get_channel_name(self, cid: str) -> str:
         """Get channel name by cid."""
-        return self.channel_map.get(cid, f'Channel {cid}')
+        if not cid:
+            return 'Unknown Channel'
+        name = self.channel_map.get(cid)
+        if name:
+            return name
+        # Log missing channel for debugging
+        logger.debug(f"Channel {cid} not found in reference data")
+        return f'Channel {cid}'
 
 
 class UsersSeenTracker:
@@ -292,11 +299,14 @@ class HumanReadableActivityLogger:
             return "Disconnected from server"
         
         elif event_type == 'clientmoved':
-            from_cid = data.get('cfid', '')
-            to_cid = data.get('ctid', '')
+            from_cid = str(data.get('cfid', ''))
+            to_cid = str(data.get('ctid', ''))
             from_name = self.reference_manager.get_channel_name(from_cid)
             to_name = self.reference_manager.get_channel_name(to_cid)
-            return f"Moved from channel {from_name} to {to_name}"
+            # Remove 'channel' prefix if the name already contains it
+            from_display = from_name if from_name.startswith('Channel ') else from_name
+            to_display = to_name if to_name.startswith('Channel ') else to_name
+            return f"Moved from {from_display} to {to_display}"
         
         elif event_type == 'clientupdated':
             # Check for nickname change

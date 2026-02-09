@@ -95,6 +95,7 @@ class TS3Bot:
         # Fetch and log current client list on startup
         if not self.clients_logger_initialized:
             self._fetch_and_log_clientlist(conn)
+            self._fetch_and_update_channels(conn)
             self.clients_logger_initialized = True
         
         return conn
@@ -218,6 +219,33 @@ class TS3Bot:
             
         except Exception as e:
             logger.error(f"Failed to fetch/log client list: {e}")
+    
+    def _fetch_and_update_channels(self, conn):
+        """Fetch current channel list and update reference data."""
+        try:
+            result = conn.channellist()
+            if not result.parsed:
+                logger.warning("Empty channel list returned")
+                return
+            
+            channels = []
+            for channel in result.parsed:
+                cid = channel.get('cid', '')
+                channel_name = channel.get('channel_name', '')
+                
+                channels.append({
+                    'cid': cid,
+                    'channel_name': channel_name
+                })
+            
+            # Update reference manager
+            if self.reference_manager:
+                self.reference_manager.update_channels(channels)
+            
+            logger.info(f"Fetched and updated {len(channels)} channels")
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch/update channel list: {e}")
     
     def _reference_data_loop(self):
         """Thread that collects reference data every minute."""
@@ -403,8 +431,8 @@ class TS3Bot:
                         clid = event_data.get("invokerid")
                         nickname = event_data.get("invokername", "")
                         
-                        # Ignore messages from x3tBot
-                        if "x3tBot" in nickname or "x3t" in nickname.lower():
+                        # Ignore messages from x3tBot and from the bot itself
+                        if "x3tBot" in nickname or "x3t" in nickname.lower() or nickname == self.nickname:
                             logger.debug("Ignoring message from %s", nickname)
                         else:
                             # Process and respond
