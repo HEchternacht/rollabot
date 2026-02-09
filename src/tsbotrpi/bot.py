@@ -828,6 +828,7 @@ class TS3Bot:
         """Event handler thread - listens for all events without timeout."""
         logger.info("Event loop thread started")
         
+        
         while self._running:
             if not self.event_conn or not self.event_conn.is_connected():
                 time.sleep(1)
@@ -1048,6 +1049,7 @@ class TS3Bot:
                 
                 # Send keepalive and check connection health
                 try:
+                    last_keepalive = time.time()
                     self.conn.send_keepalive()
                     self.event_conn.send_keepalive()
                     # Ensure connections are still connected to the server
@@ -1064,7 +1066,7 @@ class TS3Bot:
                         logger.error(f"Keepalive failed: {e}")
                         self.conn = None
                 
-                time.sleep(3)
+                time.sleep(60)
         
         except KeyboardInterrupt:
             logger.info("Bot shutdown requested")
