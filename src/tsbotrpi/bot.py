@@ -52,6 +52,7 @@ class TS3Bot:
         
         # Guild exp monitoring
         self.last_guild_refresh_ts = None
+        self.last_friendly_guild_refresh_ts = None
 
     def _ensure_server_connection(self):
         """Check if connected to server and reconnect if needed."""
@@ -410,6 +411,7 @@ class TS3Bot:
                 
                 # Check guild exp and notify registered users
                 self._check_guild_exp()
+                self._check_friendly_guild_exp()
                 
             except Exception as e:
                 logger.error(f"Error in reference data collection: {e}")
@@ -421,7 +423,7 @@ class TS3Bot:
         try:
             # Configuration
             only_online = True
-            guild = "Ascended Auroria"
+            guild = "ShellPatrocina"  
             world = "Auroria"
             base_url = "https://rubinot-guild-monitor.onrender.com/"
             
@@ -523,6 +525,114 @@ class TS3Bot:
             logger.error(f"Failed to fetch guild exp data: {e}")
         except Exception as e:
             logger.error(f"Error in guild exp check: {e}")
+    
+    def _check_friendly_guild_exp(self):
+        """Check friendly guild exp API and notify registered users of gains."""
+        try:
+            # Configuration
+            only_online = True
+            guild = "Ascended Auroria"
+            world = "Auroria"
+            base_url = "https://rubinot-guild-monitor.onrender.com/"
+            
+            # Build URL
+            url = f"/api/guild-exp?guild={encodeURIComponent(guild)}&world={encodeURIComponent(world)}&only_online={1 if only_online else 0}"
+            
+            # Make request
+            response = requests.get(base_url + url, timeout=10)
+            if response.status_code != 200:
+                logger.warning(f"Friendly guild exp API returned status {response.status_code}")
+                return
+            
+            data = response.json()
+            current_refresh_ts = data.get('last_refresh_ts')
+            
+            # Skip if no refresh or same as last check
+            if not current_refresh_ts:
+                logger.debug("No refresh timestamp in friendly guild exp data")
+                return
+            
+            if self.last_friendly_guild_refresh_ts == current_refresh_ts:
+                logger.debug("Friendly guild exp data hasn't been refreshed since last check")
+                return
+            
+            # Update timestamp
+            self.last_friendly_guild_refresh_ts = current_refresh_ts
+            
+            # Get members with exp gains
+            members_with_gains = [m for m in data.get('members', []) if m.get('delta_experience', 0) > 0]
+            
+            if not members_with_gains:
+                logger.debug("No friendly guild members with exp gains")
+                return
+            
+            # Format notification message
+            refresh_time = datetime.fromtimestamp(current_refresh_ts).strftime('%d/%m/%Y %H:%M:%S')
+            message = f"Friendly Guild Exp Update ({refresh_time}):\n"
+            message += "=" * 50 + "\n\n"
+            
+            for member in members_with_gains:
+                name = member.get('name', 'Unknown')
+                delta_exp = member.get('delta_experience', 0)
+                level = member.get('level', 0)
+                vocation = member.get('vocation', 'Unknown')
+                
+                # Format exp with thousands separator
+                delta_exp_formatted = f"{delta_exp:,}"
+                
+                message += f"{name} (Lvl {level} {vocation})\n"
+                message += f"  +{delta_exp_formatted} exp\n\n"
+            
+            logger.info(f"Friendly guild exp gains detected for {len(members_with_gains)} members")
+            
+            # Load registered users
+            log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            registered_file = os.path.join(log_dir, 'registered_friendly.txt')
+            
+            if not os.path.exists(registered_file):
+                logger.debug("No registered users for friendly guild exp notifications")
+                return
+            
+            with open(registered_file, 'r', encoding='utf-8') as f:
+                registered_uids = set(line.strip() for line in f if line.strip())
+            
+            if not registered_uids:
+                logger.debug("No registered users for friendly guild exp notifications")
+                return
+            
+            # Get current client list to find CLIDs from UIDs
+            if not self.conn or not self.conn.is_connected():
+                logger.warning("Cannot send friendly guild exp notifications: not connected")
+                return
+            
+            try:
+                clients = self.conn.clientlist(uid=True).parsed
+                
+                # Poke each registered user who is online
+                poked_count = 0
+                for client in clients:
+                    client_uid = client.get('client_unique_identifier', '')
+                    if client_uid in registered_uids:
+                        clid = client.get('clid')
+                        try:
+                            self.conn.clientpoke(clid=clid, msg=message)
+                            poked_count += 1
+                            logger.debug(f"Poked {client.get('client_nickname', 'Unknown')} with friendly guild exp update")
+                        except Exception as e:
+                            logger.error(f"Failed to poke client {clid}: {e}")
+                
+                if poked_count > 0:
+                    logger.info(f"Notified {poked_count} registered users of friendly guild exp gains")
+                else:
+                    logger.debug("No registered users currently online for friendly guild")
+                    
+            except Exception as e:
+                logger.error(f"Error sending friendly guild exp notifications: {e}")
+                
+        except requests.RequestException as e:
+            logger.error(f"Failed to fetch friendly guild exp data: {e}")
+        except Exception as e:
+            logger.error(f"Error in friendly guild exp check: {e}")
     
     def _update_client_map(self, clid: str, data: dict):
         """Update client map with new data."""
