@@ -95,87 +95,88 @@ def unregister_exp_user(uid: str) -> str:
         return f"Error unregistering: {str(e)}"
 
 
-def register_friendly_exp_user(uid: str) -> str:
-    """
-    Register a user for friendly guild exp notifications.
-    
-    Args:
-        uid: User UID to register
-    
-    Returns:
-        str: Success or error message
-    """
-    try:
-        log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        registered_file = os.path.join(log_dir, 'registered_friendly.txt')
-        logger.debug(f"Registering UID: {uid} in file: {registered_file}")
-        # Load existing UIDs
-        registered_uids = set()
-        if os.path.exists(registered_file):
-            with open(registered_file, 'r', encoding='utf-8') as f:
-                logger.debug(f"Reading existing registered UIDs from {registered_file}")
-                registered_uids = set(line.strip() for line in f if line.strip())
-        
-        # Check if already registered
-        if uid in registered_uids:
-            return "You are already registered for friendly guild exp notifications."
-        
-        # Add new UID
-        registered_uids.add(uid)
-        
-        # Write back to file
-        with open(registered_file, 'w', encoding='utf-8') as f:
-            for registered_uid in sorted(registered_uids):
-                f.write(f"{registered_uid}\n")
-        
-        logger.info(f"Registered {uid} for friendly guild exp notifications")
-        return "Successfully registered for friendly guild exp notifications!"
-        
-    except Exception as e:
-        logger.error(f"Error registering user for friendly exp notifications: {e}")
-        return f"Error registering: {str(e)}"
-
-
-def unregister_friendly_exp_user(uid: str) -> str:
-    """
-    Unregister a user from friendly guild exp notifications.
-    
-    Args:
-        uid: User UID to unregister
-    
-    Returns:
-        str: Success or error message
-    """
-    try:
-        log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        registered_file = os.path.join(log_dir, 'registered_friendly.txt')
-        
-        if not os.path.exists(registered_file):
-            return "You are not registered for friendly guild exp notifications."
-        
-        # Load existing UIDs
-        registered_uids = set()
-        with open(registered_file, 'r', encoding='utf-8') as f:
-            registered_uids = set(line.strip() for line in f if line.strip())
-        
-        # Check if registered
-        if uid not in registered_uids:
-            return "You are not registered for friendly guild exp notifications."
-        
-        # Remove UID
-        registered_uids.remove(uid)
-        
-        # Write back to file
-        with open(registered_file, 'w', encoding='utf-8') as f:
-            for registered_uid in sorted(registered_uids):
-                f.write(f"{registered_uid}\n")
-        
-        logger.info(f"Unregistered {uid} from friendly guild exp notifications")
-        return "Successfully unregistered from friendly guild exp notifications."
-        
-    except Exception as e:
-        logger.error(f"Error unregistering user from friendly exp notifications: {e}")
-        return f"Error unregistering: {str(e)}"
+# COMMENTED OUT - Friendly guild exp functions not needed anymore
+# def register_friendly_exp_user(uid: str) -> str:
+#     """
+#     Register a user for friendly guild exp notifications.
+#     
+#     Args:
+#         uid: User UID to register
+#     
+#     Returns:
+#         str: Success or error message
+#     """
+#     try:
+#         log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+#         registered_file = os.path.join(log_dir, 'registered_friendly.txt')
+#         logger.debug(f"Registering UID: {uid} in file: {registered_file}")
+#         # Load existing UIDs
+#         registered_uids = set()
+#         if os.path.exists(registered_file):
+#             with open(registered_file, 'r', encoding='utf-8') as f:
+#                 logger.debug(f"Reading existing registered UIDs from {registered_file}")
+#                 registered_uids = set(line.strip() for line in f if line.strip())
+#         
+#         # Check if already registered
+#         if uid in registered_uids:
+#             return "You are already registered for friendly guild exp notifications."
+#         
+#         # Add new UID
+#         registered_uids.add(uid)
+#         
+#         # Write back to file
+#         with open(registered_file, 'w', encoding='utf-8') as f:
+#             for registered_uid in sorted(registered_uids):
+#                 f.write(f"{registered_uid}\n")
+#         
+#         logger.info(f"Registered {uid} for friendly guild exp notifications")
+#         return "Successfully registered for friendly guild exp notifications!"
+#         
+#     except Exception as e:
+#         logger.error(f"Error registering user for friendly exp notifications: {e}")
+#         return f"Error registering: {str(e)}"
+# 
+# 
+# def unregister_friendly_exp_user(uid: str) -> str:
+#     """
+#     Unregister a user from friendly guild exp notifications.
+#     
+#     Args:
+#         uid: User UID to unregister
+#     
+#     Returns:
+#         str: Success or error message
+#     """
+#     try:
+#         log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+#         registered_file = os.path.join(log_dir, 'registered_friendly.txt')
+#         
+#         if not os.path.exists(registered_file):
+#             return "You are not registered for friendly guild exp notifications."
+#         
+#         # Load existing UIDs
+#         registered_uids = set()
+#         with open(registered_file, 'r', encoding='utf-8') as f:
+#             registered_uids = set(line.strip() for line in f if line.strip())
+#         
+#         # Check if registered
+#         if uid not in registered_uids:
+#             return "You are not registered for friendly guild exp notifications."
+#         
+#         # Remove UID
+#         registered_uids.remove(uid)
+#         
+#         # Write back to file
+#         with open(registered_file, 'w', encoding='utf-8') as f:
+#             for registered_uid in sorted(registered_uids):
+#                 f.write(f"{registered_uid}\n")
+#         
+#         logger.info(f"Unregistered {uid} from friendly guild exp notifications")
+#         return "Successfully unregistered from friendly guild exp notifications."
+#         
+#     except Exception as e:
+#         logger.error(f"Error unregistering user from friendly exp notifications: {e}")
+#         return f"Error unregistering: {str(e)}"
 
 
 def get_txt():
@@ -419,8 +420,8 @@ def process_command(bot, msg, nickname):
             "!lastminuteslogs <minutes> - Get activity from last N minutes\n"
             "!registerexp - Register for guild exp notifications\n"
             "!unregisterexp - Unregister from guild exp notifications\n"
-            "!registerfriendlyexp - Register for friendly guild exp notifications\n"
-            "!unregisterfriendlyexp - Unregister from friendly guild exp notifications\n"
+            # "!registerfriendlyexp - Register for friendly guild exp notifications\n"  # Commented out
+            # "!unregisterfriendlyexp - Unregister from friendly guild exp notifications\n"  # Commented out
         )
 
 
@@ -553,87 +554,88 @@ def process_command(bot, msg, nickname):
             logger.error(f"Error in unregisterexp command: {e}")
             return "Error unregistering. Please try again."
     
-    # Register for friendly guild exp notifications
-    if msg.startswith("!registerfriendlyexp"):
-        # Get user UID from reference data (avoid API calls from event loop)
-        try:
-            logger.debug(f"Processing registerfriendlyexp for nickname: {nickname}")
-            user_uid = None
-            
-            # Use reference manager's client_map if available
-            if hasattr(bot, 'client_map') and bot.client_map:
-                logger.debug("Looking up UID in bot's client_map")
-                for clid, client_info in bot.client_map.items():
-                    logger.debug(f"Checking client: {client_info.get('nickname', '')}")
-                    if client_info.get('nickname', '').lower() == nickname.lower():
-                        logger.debug(f"Found matching client: {client_info}")
-                        user_uid = client_info.get('uid', '')
-                        logger.debug(f"Extracted UID: {user_uid}")
-                        break
-            
-            # Fallback: Read from CSV if not in memory
-            if not user_uid:
-                logger.debug("Looking up UID in clients_reference.csv")
-                try:
-                    log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                    clients_ref_path = os.path.join(log_dir, 'clients_reference.csv')
-                    logger.debug(f"Checking for clients_reference.csv at: {clients_ref_path}")
-                    if os.path.exists(clients_ref_path):
-                        logger.debug("Found clients_reference.csv, reading file")
-                        with open(clients_ref_path, 'r', newline='', encoding='utf-8') as f:
-                            reader = csv.DictReader(f)
-                            for row in reader:
-                                if row.get('nickname', '').lower() == nickname.lower():
-                                    user_uid = row.get('uid', '')
-                                    break
-                except Exception as ref_error:
-                    logger.debug(f"Could not read reference data: {ref_error}")
-            
-            if user_uid:
-                logger.debug(f"Registering user UID: {user_uid} for friendly exp notifications")
-                return register_friendly_exp_user(user_uid)
-            else:
-                return "Could not find your UID. Please wait a minute for data to refresh and try again."
-        except Exception as e:
-            logger.error(f"Error in registerfriendlyexp command: {e}")
-            return "Error registering. Please try again."
-    
-    # Unregister from friendly guild exp notifications
-    if msg.startswith("!unregisterfriendlyexp"):
-        # Get user UID from reference data (avoid API calls from event loop)
-        try:
-            user_uid = None
-            
-            # Use reference manager's client_map if available
-            if hasattr(bot, 'client_map') and bot.client_map:
-                for clid, client_info in bot.client_map.items():
-                    if client_info.get('nickname', '').lower() == nickname.lower():
-                        user_uid = client_info.get('uid', '')
-                        break
-            
-            # Fallback: Read from CSV if not in memory
-            if not user_uid:
-                try:
-                    log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                    clients_ref_path = os.path.join(log_dir, 'clients_reference.csv')
-                    
-                    if os.path.exists(clients_ref_path):
-                        with open(clients_ref_path, 'r', newline='', encoding='utf-8') as f:
-                            reader = csv.DictReader(f)
-                            for row in reader:
-                                if row.get('nickname', '').lower() == nickname.lower():
-                                    user_uid = row.get('uid', '')
-                                    break
-                except Exception as ref_error:
-                    logger.debug(f"Could not read reference data: {ref_error}")
-            
-            if user_uid:
-                return unregister_friendly_exp_user(user_uid)
-            else:
-                return "Could not find your UID. Please wait a minute for data to refresh and try again."
-        except Exception as e:
-            logger.error(f"Error in unregisterfriendlyexp command: {e}")
-            return "Error unregistering. Please try again."
+    # COMMENTED OUT - Friendly guild exp commands not needed anymore
+    # # Register for friendly guild exp notifications
+    # if msg.startswith("!registerfriendlyexp"):
+    #     # Get user UID from reference data (avoid API calls from event loop)
+    #     try:
+    #         logger.debug(f"Processing registerfriendlyexp for nickname: {nickname}")
+    #         user_uid = None
+    #         
+    #         # Use reference manager's client_map if available
+    #         if hasattr(bot, 'client_map') and bot.client_map:
+    #             logger.debug("Looking up UID in bot's client_map")
+    #             for clid, client_info in bot.client_map.items():
+    #                 logger.debug(f"Checking client: {client_info.get('nickname', '')}")
+    #                 if client_info.get('nickname', '').lower() == nickname.lower():
+    #                     logger.debug(f"Found matching client: {client_info}")
+    #                     user_uid = client_info.get('uid', '')
+    #                     logger.debug(f"Extracted UID: {user_uid}")
+    #                     break
+    #         
+    #         # Fallback: Read from CSV if not in memory
+    #         if not user_uid:
+    #             logger.debug("Looking up UID in clients_reference.csv")
+    #             try:
+    #                 log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    #                 clients_ref_path = os.path.join(log_dir, 'clients_reference.csv')
+    #                 logger.debug(f"Checking for clients_reference.csv at: {clients_ref_path}")
+    #                 if os.path.exists(clients_ref_path):
+    #                     logger.debug("Found clients_reference.csv, reading file")
+    #                     with open(clients_ref_path, 'r', newline='', encoding='utf-8') as f:
+    #                         reader = csv.DictReader(f)
+    #                         for row in reader:
+    #                             if row.get('nickname', '').lower() == nickname.lower():
+    #                                 user_uid = row.get('uid', '')
+    #                                 break
+    #             except Exception as ref_error:
+    #                 logger.debug(f"Could not read reference data: {ref_error}")
+    #         
+    #         if user_uid:
+    #             logger.debug(f"Registering user UID: {user_uid} for friendly exp notifications")
+    #             return register_friendly_exp_user(user_uid)
+    #         else:
+    #             return "Could not find your UID. Please wait a minute for data to refresh and try again."
+    #     except Exception as e:
+    #         logger.error(f"Error in registerfriendlyexp command: {e}")
+    #         return "Error registering. Please try again."
+    # 
+    # # Unregister from friendly guild exp notifications
+    # if msg.startswith("!unregisterfriendlyexp"):
+    #     # Get user UID from reference data (avoid API calls from event loop)
+    #     try:
+    #         user_uid = None
+    #         
+    #         # Use reference manager's client_map if available
+    #         if hasattr(bot, 'client_map') and bot.client_map:
+    #             for clid, client_info in bot.client_map.items():
+    #                 if client_info.get('nickname', '').lower() == nickname.lower():
+    #                     user_uid = client_info.get('uid', '')
+    #                     break
+    #         
+    #         # Fallback: Read from CSV if not in memory
+    #         if not user_uid:
+    #             try:
+    #                 log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    #                 clients_ref_path = os.path.join(log_dir, 'clients_reference.csv')
+    #                 
+    #                 if os.path.exists(clients_ref_path):
+    #                     with open(clients_ref_path, 'r', newline='', encoding='utf-8') as f:
+    #                         reader = csv.DictReader(f)
+    #                         for row in reader:
+    #                             if row.get('nickname', '').lower() == nickname.lower():
+    #                                 user_uid = row.get('uid', '')
+    #                                 break
+    #             except Exception as ref_error:
+    #                 logger.debug(f"Could not read reference data: {ref_error}")
+    #         
+    #         if user_uid:
+    #             return unregister_friendly_exp_user(user_uid)
+    #         else:
+    #             return "Could not find your UID. Please wait a minute for data to refresh and try again."
+    #     except Exception as e:
+    #         logger.error(f"Error in unregisterfriendlyexp command: {e}")
+    #         return "Error unregistering. Please try again."
     
     # Unknown command
 
