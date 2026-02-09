@@ -28,7 +28,8 @@ class TS3Bot:
         self.server_address = server_address
         self.nickname = nickname
         self.process_manager = process_manager
-        self.conn = None
+        self.conn = None  # Main connection for commands, keepalive, reference data
+        self.event_conn = None  # Dedicated connection for event loop
         self._event_thread = None
         self._reference_thread = None
         self._running = False
@@ -78,12 +79,10 @@ class TS3Bot:
                     logger.debug(f"Server connection check/reconnect failed: {e2}")
 
     def setup_connection(self):
-        """Setup TS3 ClientQuery connection."""
+        """Setup TS3 ClientQuery connection for commands and operations."""
         conn = ts3.query.TS3ClientConnection(self.host)
         conn.auth(apikey=self.api_key)
         conn.use()
-        # Register for ALL notifications, not just text messages
-        conn.clientnotifyregister(event="any", schandlerid=1)
         
         # Connect to server if address is configured
         if self.server_address:
@@ -136,6 +135,24 @@ class TS3Bot:
             self._fetch_and_log_clientlist(conn)
             self._fetch_and_update_channels(conn)
             self.clients_logger_initialized = True
+        
+        return conn
+
+    def setup_event_connection(self):
+        """Setup dedicated TS3 ClientQuery connection for event loop."""
+        conn = ts3.query.TS3ClientConnection(self.host)
+        conn.auth(apikey=self.api_key)
+        conn.use()
+        # Register for ALL notifications
+        conn.clientnotifyregister(event="any", schandlerid=1)
+        
+        # Connect to server if address is configured
+        if self.server_address:
+            try:
+                conn.send(f"connect address={self.server_address} nickname={self.nickname}")
+            except Exception as e:
+                # Ignore "already connected" error
+                pass
         
         return conn
 
@@ -582,14 +599,14 @@ class TS3Bot:
         logger.info("Event loop thread started")
         
         while self._running:
-            if not self.conn or not self.conn.is_connected():
+            if not self.event_conn or not self.event_conn.is_connected():
                 time.sleep(1)
-                #logger.debug("No connection in event loop, sleeping...")
+                #logger.debug("No event connection, sleeping...")
                 continue
             
             try:
                 # Wait for events (no timeout - blocking call)
-                events = self.conn.wait_for_event()
+                events = self.event_conn.wait_for_event()
                 for event in events:
                     if event.parsed and event._data and len(event._data) > 0:
                         # Extract event type from raw data
@@ -653,13 +670,20 @@ class TS3Bot:
         logger.info("Starting bot...")
         self._running = True
         
-        # Create initial connection
+        # Create main connection for operations
         try:
             self.conn = self.setup_connection()
-            logger.info("Initial connection established")
+            logger.info("Main connection established")
         except Exception as e:
-            logger.error("Failed to establish initial connection: %s", e)
+            logger.error("Failed to establish main connection: %s", e)
             self._reconnect(e)
+        
+        # Create dedicated connection for event loop
+        try:
+            self.event_conn = self.setup_event_connection()
+            logger.info("Event connection established")
+        except Exception as e:
+            logger.error("Failed to establish event connection: %s", e)
         
         logger.info("Setting up event loop thread...")
         self._event_thread = threading.Thread(target=self._event_loop, daemon=True)
@@ -674,26 +698,36 @@ class TS3Bot:
 
         try:
             while self._running:
-                # Only reconnect if connection is None
+                # Reconnect main connection if needed
                 if self.conn is None:
                     try:
                         self.conn = self.setup_connection()
+                        logger.info("Main connection re-established")
+                    except Exception as e:
+                        self._reconnect(e)
+                        time.sleep(2)
+                        continue
+                
+                # Reconnect event connection if needed
+                if self.event_conn is None or not self.event_conn.is_connected():
+                    try:
+                        self.event_conn = self.setup_event_connection()
+                        logger.info("Event connection re-established")
                         
-                        # Start event thread if not running
+                        # Restart event thread if not running
                         if not self._event_thread or not self._event_thread.is_alive():
-                            logger.info("re:Starting event loop thread...")
+                            logger.info("Restarting event loop thread...")
                             self._event_thread = threading.Thread(target=self._event_loop, daemon=True)
                             self._event_thread.start()
-                            logger.info("Event thread started")
                     except Exception as e:
-                        #logger.error("Connection failed: %s", e)
-                        self._reconnect(e)
+                        logger.error("Failed to reconnect event connection: %s", e)
                         time.sleep(2)
                         continue
                 
                 # Send keepalive and check connection health
                 try:
                     self.conn.send_keepalive()
+                    self.event_conn.send_keepalive()
                     # Ensure we're still connected to the server
                     self._ensure_server_connection()
                 except Exception as e:
@@ -709,6 +743,16 @@ class TS3Bot:
                 self._event_thread.join(timeout=5)
             if self._reference_thread:
                 self._reference_thread.join(timeout=5)
+            if self.event_conn:
+                try:
+                    self.event_conn.close()
+                except Exception as e:
+                    logger.error(f"Error closing event connection: {e}")
+            if self.conn:
+                try:
+                    self.conn.close()
+                except Exception as e:
+                    logger.error(f"Error closing main connection: {e}")
             if self.activity_logger:
                 try:
                     self.activity_logger.close()
