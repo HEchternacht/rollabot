@@ -98,7 +98,9 @@ class TS3Bot:
         # Connect to server if address is configured
         if self.server_address:
             try:
+                
                 conn.send(f"connect address={self.server_address} nickname={self.nickname}")
+                logger.info("Connected to server %s as %s", self.server_address, self.nickname)
                 time.sleep(10)
                 #logger.info("Connected to server %s as %s", self.server_address, self.nickname)
             except Exception as e:
@@ -107,6 +109,7 @@ class TS3Bot:
                 #    logger.debug("Already connected to server")
                 #else:
                 #    logger.warning("Connect command failed: %s", e)
+                logger.error("Initial connection to server failed: %s", e)
                 pass
         
         #logger.info("Connected to ClientQuery at %s", self.host)
