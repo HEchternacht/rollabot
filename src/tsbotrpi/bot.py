@@ -123,7 +123,32 @@ class TS3Bot:
         """Reconnect and start/restart TS client only if connection refused."""
         self.conn = None
         
-        # Try to connect first
+        # Check if TS client process is running
+        ts_is_running = False
+        if self.process_manager:
+            pid = self.process_manager._read_pid()
+            if pid and self.process_manager._is_running(pid):
+                ts_is_running = True
+                logger.info("TS client process is running (PID %s), attempting reconnection", pid)
+        
+        # If TS is running, try reconnecting multiple times before restarting
+        if ts_is_running:
+            for attempt in range(1, 4):  # 3 attempts
+                try:
+                    logger.info("Reconnection attempt %d/3...", attempt)
+                    self.conn = self.setup_connection()
+                    logger.info("Reconnected successfully on attempt %d", attempt)
+                    return
+                except Exception as e:
+                    logger.error("Reconnection attempt %d failed: %s", attempt, e)
+                    if attempt < 3:
+                        logger.info("Waiting 20s before next attempt...")
+                        time.sleep(20)
+            
+            # All reconnection attempts failed
+            logger.warning("All 3 reconnection attempts failed, will restart TS client")
+        
+        # Try to connect first (if TS wasn't running or reconnection attempts failed)
         try:
             self.conn = self.setup_connection()
             logger.info("Reconnected successfully")
@@ -133,7 +158,7 @@ class TS3Bot:
             
             # Only start/restart TS client if connection refused or address not found
             if self._is_connection_refused(e) and self.process_manager:
-                logger.warning("Connection refused/unavailable - starting TS client")
+                logger.warning("Connection refused/unavailable - restarting TS client")
                 restarted = self.process_manager.restart()
                 
                 # Wait longer if we actually restarted (box64 takes ~60s)
@@ -145,9 +170,10 @@ class TS3Bot:
                 # Try connecting again
                 try:
                     self.conn = self.setup_connection()
-                    logger.info("Connected after starting TS client")
+                    logger.info("Connected after restarting TS client")
                 except Exception as e2:
                     logger.error("Still cannot connect: %s", e2)
+                    time.sleep(2)
                     time.sleep(2)
 
     def get_xbot(self):
