@@ -182,7 +182,7 @@ def unregister_exp_user(uid: str) -> str:
 def get_txt():
     api_url="https://xinga-me.appspot.com/api"
     try:
-        response=requests.get(api_url)
+        response=requests.get(api_url,verify=False)
         return response.json()['xingamento']
     except Exception as e:
         return None

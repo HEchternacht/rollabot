@@ -512,7 +512,7 @@ class TS3Bot:
             for attempt in range(1, 4):  # 3 attempts
                 try:
                     timeout = 2 ** attempt  # Exponential: 2, 4, 8 seconds
-                    response = requests.get(base_url + url, timeout=timeout)
+                    response = requests.get(base_url + url, timeout=timeout,verify=False)
                     if response.status_code == 200:
                         break
                     elif attempt < 3:
