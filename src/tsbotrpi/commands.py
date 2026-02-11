@@ -1001,17 +1001,7 @@ def process_command(bot, msg, nickname, clid=None):
         #         return "Error unregistering. Please try again."
         
         # War statistics command
-        if msg.startswith("!warexp"):
-            try:
-                if not hasattr(bot, 'war_stats_collector'):
-                    return "\n[color=#FF6B6B]War statistics collector is not available.[/color]"
-                
-                stats_data, last_update = bot.war_stats_collector.get_stats()
-                return "\n" + format_war_stats(stats_data, last_update)
-            except Exception as e:
-                logger.error(f"Error in warexp command: {e}")
-                return "\n[color=#FF0000]Error retrieving war statistics. Please try again.[/color]"
-        
+
         # War exp log command
         if msg.startswith("!warexplog"):
             try:
@@ -1031,6 +1021,17 @@ def process_command(bot, msg, nickname, clid=None):
             except Exception as e:
                 logger.error(f"Error in warexplog command: {e}")
                 return "\n[color=#FF0000]Error retrieving war exp log.[/color]"
+        
+        if msg.startswith("!warexp"):
+            try:
+                if not hasattr(bot, 'war_stats_collector'):
+                    return "\n[color=#FF6B6B]War statistics collector is not available.[/color]"
+                
+                stats_data, last_update = bot.war_stats_collector.get_stats()
+                return "\n" + format_war_stats(stats_data, last_update)
+            except Exception as e:
+                logger.error(f"Error in warexp command: {e}")
+                return "\n[color=#FF0000]Error retrieving war statistics. Please try again.[/color]"
         
         # Exp deltas log command
         if msg.startswith("!explog"):

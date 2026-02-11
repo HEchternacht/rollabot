@@ -563,7 +563,8 @@ class TS3Bot:
         
         for client in clients:
             for chunk in msg_chunks:
-                self.conn.clientpoke(msg=chunk, clid=client["clid"])
+                msg=chunk if chunk.startswith("\n") else "\n"+chunk
+                self.conn.clientpoke(msg=msg, clid=client["clid"])
     
     @timed
     def _fetch_and_log_clientlist(self, conn):
