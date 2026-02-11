@@ -518,11 +518,52 @@ class TS3Bot:
         
         return f"Added {target} to hunted list"
 
+    def _split_poke_message(self, msg, max_length=1000):
+        """Split a poke message into chunks of max_length, preferring to split at newlines.
+        
+        Args:
+            msg: Message string to split
+            max_length: Maximum length per chunk (default 1000)
+            
+        Returns:
+            List of message chunks
+        """
+        if len(msg) <= max_length:
+            return [msg]
+        
+        chunks = []
+        remaining = msg
+        
+        while remaining:
+            if len(remaining) <= max_length:
+                chunks.append(remaining)
+                break
+            
+            # Take up to max_length characters
+            chunk = remaining[:max_length]
+            
+            # Try to find the last newline within the chunk
+            last_newline = chunk.rfind('\n')
+            
+            if last_newline > 0:  # Found a newline (not at position 0)
+                # Split at the newline (include the newline in the chunk)
+                chunks.append(remaining[:last_newline + 1])
+                remaining = remaining[last_newline + 1:]
+            else:
+                # No newline found, split at max_length
+                chunks.append(chunk)
+                remaining = remaining[max_length:]
+        
+        return chunks
+    
     def masspoke(self, msg):
         """Poke all connected clients."""
         clients = self.conn.clientlist().parsed
+        msg_chunks = self._split_poke_message(msg)
+        
         for client in clients:
-            self.conn.clientpoke(msg=msg, clid=client["clid"])
+            for chunk in msg_chunks:
+                self.conn.clientpoke(msg=chunk, clid=client["clid"])
     
     @timed
     def _fetch_and_log_clientlist(self, conn):
@@ -1065,6 +1106,9 @@ class TS3Bot:
             target_uids = poke_item['target_uids']
             timestamp = poke_item['timestamp']
             
+            # Split message into chunks if needed
+            message_chunks = self._split_poke_message(message)
+            
             # Remove UIDs of users we successfully poke
             successfully_poked = set()
             connection_broken = False
@@ -1078,13 +1122,16 @@ class TS3Bot:
                 nickname = uid_to_clid[target_uid]['nickname']
                 
                 try:
-                    poke_start = time.perf_counter()
-                    self.worker_conn.clientpoke(clid=clid, msg=message)
-                    poke_time = (time.perf_counter() - poke_start) * 1000
-                    logger.debug(f"⏱️ Clientpoke: {poke_time:.2f}ms")
+                    # Send all chunks to this user
+                    for chunk in message_chunks:
+                        poke_start = time.perf_counter()
+                        self.worker_conn.clientpoke(clid=clid, msg=chunk)
+                        poke_time = (time.perf_counter() - poke_start) * 1000
+                        logger.debug(f"⏱️ Clientpoke: {poke_time:.2f}ms")
+                    
                     successfully_poked.add(target_uid)
                     total_sent += 1
-                    logger.debug(f"Poked {nickname} with pending message")
+                    logger.debug(f"Poked {nickname} with pending message ({len(message_chunks)} chunk(s))")
                 except Exception as e:
                     error_str = str(e).lower()
                     if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
