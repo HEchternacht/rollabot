@@ -763,6 +763,7 @@ def process_command(bot, msg, nickname):
             "[b][color=#90EE90]!warexp[/color][/b] - Show war statistics (Shell vs Ascended)\n"
             "[b][color=#90EE90]!warexplog [days][/color][/b] - Show war exp history (default: 30 days)\n"
             "[b][color=#90EE90]!explog [minutes][/color][/b] - Show recent exp gains (default: 100 entries)\n"
+            "[b][color=#90EE90]!showlogs[/color][/b] - Show last 100 warnings/errors\n"
             "[color=#505050]─────────────────────────────────────[/color]"
             # "!registerfriendlyexp - Register for friendly guild exp notifications\n"  # Commented out
             # "!unregisterfriendlyexp - Unregister from friendly guild exp notifications\n"  # Commented out
@@ -1044,6 +1045,47 @@ def process_command(bot, msg, nickname):
         except Exception as e:
             logger.error(f"Error in explog command: {e}")
             return "[color=#FF0000]Error retrieving exp log.[/color]"
+    
+    # Show logs command
+    if msg.startswith("!showlogs"):
+        try:
+            if not hasattr(bot, 'log_handler'):
+                return "[color=#FF6B6B]Log handler is not available.[/color]"
+            
+            logs = bot.log_handler.get_logs(100)
+            
+            if not logs:
+                return "[color=#A0A0A0]No warnings or errors logged yet.[/color]"
+            
+            # Format output
+            message = f"[b][color=#FFD700]═══ Bot Logs (Last {len(logs)} Entries) ═══[/color][/b]\n"
+            message += "[color=#505050]" + "═" * 60 + "[/color]\n\n"
+            
+            # Show in reverse order (newest first)
+            for log in reversed(logs):
+                timestamp = log.get('timestamp', 'Unknown')
+                level = log.get('level', 'UNKNOWN')
+                log_message = log.get('message', '')
+                module = log.get('module', '')
+                
+                # Color based on level
+                if level == 'ERROR' or level == 'CRITICAL':
+                    level_color = '#FF6B6B'  # Red
+                elif level == 'WARNING':
+                    level_color = '#FFD700'  # Gold
+                else:
+                    level_color = '#A0A0A0'  # Gray
+                
+                message += f"[color=#A0A0A0]{timestamp}[/color] "
+                message += f"[b][color={level_color}]{level}[/color][/b] "
+                message += f"[color=#505050]({module})[/color]\n"
+                message += f"  [color=#FFFFFF]{log_message}[/color]\n\n"
+            
+            message += "[color=#505050]" + "═" * 60 + "[/color]"
+            return message
+        except Exception as e:
+            logger.error(f"Error in showlogs command: {e}")
+            return "[color=#FF0000]Error retrieving logs.[/color]"
     
     # Unknown command
 

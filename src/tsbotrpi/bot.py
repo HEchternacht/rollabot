@@ -23,6 +23,33 @@ from .activity_logger import (
 logger = logging.getLogger(__name__)
 
 
+class MemoryLogHandler(logging.Handler):
+    """Custom logging handler that stores log records in memory."""
+    
+    def __init__(self, maxlen=100):
+        super().__init__()
+        self.log_buffer = deque(maxlen=maxlen)
+        self.setLevel(logging.WARNING)  # Only capture WARNING and above
+    
+    def emit(self, record):
+        """Store log record in buffer."""
+        try:
+            log_entry = {
+                'timestamp': datetime.fromtimestamp(record.created).strftime('%d/%m/%Y %H:%M:%S'),
+                'level': record.levelname,
+                'message': self.format(record),
+                'module': record.module
+            }
+            self.log_buffer.append(log_entry)
+        except Exception:
+            self.handleError(record)
+    
+    def get_logs(self, count=100):
+        """Get the last N log entries."""
+        logs = list(self.log_buffer)
+        return logs[-count:] if count < len(logs) else logs
+
+
 class WarStatsCollector:
     """Collects war statistics from API every 3 minutes."""
     
@@ -225,6 +252,11 @@ class TS3Bot:
         
         # Pending pokes queue for reliable delivery
         self.pending_pokes = deque()  # Each item: {'message': str, 'target_uids': set, 'timestamp': float}
+        
+        # Memory log handler for !showlogs command
+        self.log_handler = MemoryLogHandler(maxlen=100)
+        self.log_handler.setFormatter(logging.Formatter('%(name)s - %(message)s'))
+        logging.getLogger().addHandler(self.log_handler)
 
     @timed
     def _ensure_server_connection(self, conn=None, conn_name="connection"):
