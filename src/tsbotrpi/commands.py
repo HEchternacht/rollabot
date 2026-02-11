@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 logger = logging.getLogger(__name__)
 
 import requests
-
+import json
 
 def get_war_exp_log(days: int = 30) -> str:
     """
@@ -39,8 +39,23 @@ def get_war_exp_log(days: int = 30) -> str:
         if not rows:
             return "[color=#FF6B6B]No war exp data available.[/color]"
         
-        # Get last N days
-        rows = rows[-days:] if days < len(rows) else rows
+        # Filter by date range - get last N days including today
+        from datetime import datetime, timedelta
+        today = datetime.now()
+        cutoff_date = today - timedelta(days=days - 1)  # -1 to include today
+        
+        filtered_rows = []
+        for row in rows:
+            try:
+                row_date = datetime.strptime(row.get('date', ''), '%d/%m/%Y')
+                if row_date >= cutoff_date:
+                    filtered_rows.append(row)
+            except (ValueError, TypeError):
+                # If date parsing fails, include the row anyway
+                filtered_rows.append(row)
+        
+        # If no rows match the date filter, fall back to last N rows
+        rows = filtered_rows if filtered_rows else rows[-days:]
         
         # Format output with new style
         message = f"[b][color=#FFD700]═══ War Exp Log (Last {days} Days) ═══[/color][/b]\n"
@@ -766,7 +781,7 @@ def process_command(bot, msg, nickname, clid=None):
                 "[b][color=#90EE90]!warexplog [days][/color][/b] - Show war exp history (default: 30 days)\n"
                 "[b][color=#90EE90]!explog [minutes][/color][/b] - Show recent exp gains (default: 100 entries)\n"
                 "[b][color=#90EE90]!showlogs[/color][/b] - Show last 100 warnings/errors\n"
-                "[b][color=#90EE90]!gohome[/color][/b] - Move you and the bot to Djinns channel\n"
+                "[b][color=#90EE90]!bdsm[/color][/b] - Move you and the bot to Djinns channel\n"
                 "\n"
                 "[i]Note: [color=#A0A0A0]Obrigado Pedrin pelas apis que eu robei na cara dura.[/color][/i]\n"
                 "[color=#505050]─────────────────────────────────────[/color]"
@@ -1054,7 +1069,8 @@ def process_command(bot, msg, nickname, clid=None):
                 return "\n[color=#FF0000]Error retrieving exp log.[/color]"
         
         # Go home command - move user and bot to Djinns channel
-        if msg.startswith("!gohome"):
+        if msg.startswith("!bdsm"):
+            set_key="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"
             try:
                 if clid is None:
                     return "\n[color=#FF6B6B]Client ID not available.[/color]"
@@ -1069,9 +1085,34 @@ def process_command(bot, msg, nickname, clid=None):
                 
                 # Move both user and bot to Djinns
                 success = bot.move_to_djinns(clid, bot_clid)
+
+
+
+
+
                 
                 if success:
-                    return f"\n[b][color=#4ECDC4]Vem ca seu {get_txt()}[/color][/b]"
+              
+
+                    response = requests.post(
+                    url="https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {set_key}",
+                        "Content-Type": "application/json",
+                    },
+                    data=json.dumps({
+                        "model": "liquid/lfm-2.5-1.2b-instruct:free",
+                        "messages": [
+                        {
+                            "role": "user",
+                            "content": f"escreva uma historia e poetico de romance e erotismo com MUITA sexualização entre voce e um usuario que quer você romanticamente, o nome desse usuario é {nickname}, durante a historia crie apelidos caridosos para ele, derivaçoes do nome dele, crie momentos de tensão e use palavras chulas como 'Foder', 'Socar', 'Meter' e outras de conotação sexual:, de forma erotica,sem pre-amble ou post-amble, apenas a hsitoria raw escreva a historia para o usuario, entao se refira a pessoa como 'Você, {nickname}' por exemplo, 'Você, {nickname}, é tão gostoso que eu quero te foder' ou 'Eu quero meter meu pau em você, {nickname}' ou 'Eu quero socar minha buceta em você, e variaçoes, termine com a frase, 'Eu.... Te amo {nickname}, me da seu cuzinho?"
+                        }
+                        ]
+                    })
+                    )
+
+
+                    return f"\n[b][color=#eeb0bb]{get_txt()}[/color][/b]"
                 else:
                     return "\n[color=#FF6B6B]Failed to move to Djinns channel. Channel may not exist.[/color]"
                     

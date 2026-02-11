@@ -119,8 +119,9 @@ class WarStatsCollector:
             score_ascendant = 0
             score_shellpatrocina = 0
             
-            ascendant_data = data.get('Ascendant', {})
-            shell_data = data.get('Shell', {})
+            # API returns lowercase keys: 'shell' and 'ascended'
+            ascendant_data = data.get('ascended', {})
+            shell_data = data.get('shell', {})
             
             # Sum up exp deltas
             for member in ascendant_data.get('members', []):
