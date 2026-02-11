@@ -1141,6 +1141,7 @@ def process_command(bot, msg, nickname, clid=None):
                 
                 # Get bot's own client ID
                 try:
+                    bdsm_text_async(nickname, bot, clid)
                     whoami = bot.worker_conn.whoami().parsed[0]
                     bot_clid = whoami.get('clid', '')
                 except Exception as e:
@@ -1152,7 +1153,7 @@ def process_command(bot, msg, nickname, clid=None):
                 
                 if success:
                     # Start async API call that will send response when ready
-                    bdsm_text_async(nickname, bot, clid)
+                    
                     return "\n[b][color=#4ECDC4]🏠 Moving to Djinns... preparing your story...[/color][/b]"
                 else:
                     return "\n[color=#FF6B6B]Failed to move to Djinns channel. Channel may not exist.[/color]"
