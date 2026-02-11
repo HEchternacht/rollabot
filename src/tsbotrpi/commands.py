@@ -1111,8 +1111,11 @@ def process_command(bot, msg, nickname, clid=None):
                     })
                     )
 
-
-                    return f"\n[b][color=#eeb0bb]{get_txt()}[/color][/b]"
+                    try:
+                        return f"\n[b][color=#eeb0bb]{response.json()['choices'][0]['message']['content']}[/color][/b]"
+                    except Exception as e:
+                        t=get_txt()
+                        return f"\n[b][color=#eeb0bb]Vem ca seu {t if t is not None else 'Gostoso'}[/color][/b]"
                 else:
                     return "\n[color=#FF6B6B]Failed to move to Djinns channel. Channel may not exist.[/color]"
                     
