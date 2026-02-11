@@ -755,7 +755,8 @@ def bdsm_text_async(nickname, bot, clid):
     import threading
     
     def _fetch_and_send():
-        set_key="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"
+        #set_key="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"
+        set_key = os.getenv("OPENROUTER_API_KEY", "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")
         
         try:
             response = requests.post(
