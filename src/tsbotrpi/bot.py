@@ -851,6 +851,53 @@ class TS3Bot:
         except Exception as e:
             logger.error(f"Error in channel move: {e}", exc_info=True)
     
+    def move_to_djinns(self, *clids):
+        """Move specified client IDs to Djinns channel.
+        
+        Args:
+            *clids: Variable number of client IDs to move
+        """
+        try:
+            target_channel_name = "djinn"
+            
+            # Get channel ID from reference manager
+            if not self.reference_manager:
+                logger.warning("Reference manager not available for channel move")
+                return False
+            
+            # Search for channel in reference data
+            channel_id = None
+            
+            for cid, channel_name in self.reference_manager.channel_map.items():
+                if channel_name.lower() in target_channel_name.lower():
+                    channel_id = cid
+                    break
+            
+            if not channel_id:
+                logger.warning(f"Channel '{target_channel_name}' not found in reference data")
+                return False
+            
+            # Move each client to target channel
+            try:
+                for clid in clids:
+                    self.worker_conn.clientmove(cid=channel_id, clid=clid)
+                    logger.debug(f"Moved client {clid} to channel '{target_channel_name}' (cid={channel_id})")
+                
+                return True
+                
+            except Exception as e:
+                error_str = str(e).lower()
+                if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
+                    logger.warning(f"Connection error during channel move: {e}")
+                    self.worker_conn = None
+                else:
+                    logger.error(f"Error moving clients to channel: {e}")
+                return False
+                    
+        except Exception as e:
+            logger.error(f"Error in channel move: {e}", exc_info=True)
+            return False
+    
     def _log_exp_deltas(self, members_with_gains):
         """Log individual exp deltas to exp_deltas.csv."""
         try:
@@ -1334,7 +1381,7 @@ class TS3Bot:
                         logger.debug(f"Processing command from {nickname}: {msg[:20]}...")
                         
                         cmd_start = time.perf_counter()
-                        response = process_command(self, msg, nickname)
+                        response = process_command(self, msg, nickname, clid)
                         cmd_time = (time.perf_counter() - cmd_start) * 1000
                         logger.debug(f"⏱️ Command processing: {cmd_time:.2f}ms")
                         

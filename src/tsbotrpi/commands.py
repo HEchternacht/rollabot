@@ -702,7 +702,7 @@ def search_activity_log(search_term: str, max_results: int = 50):
                     all_matches.append(row)
         
         if not all_matches:
-            return f"[color=#FF6B6B]No activity found for: {search_term}[/color]"
+            return f"\n[color=#FF6B6B]No activity found for: {search_term}[/color]"
         
         # Take only the LAST max_results entries
         matches = all_matches[-max_results:]
@@ -730,10 +730,10 @@ def search_activity_log(search_term: str, max_results: int = 50):
         
     except Exception as e:
         logger.error(f"Error searching activity log: {e}")
-        return f"[color=#FF0000]Error searching log: {str(e)}[/color]"
+        return f"\n[color=#FF0000]Error searching log: {str(e)}[/color]"
 
 
-def process_command(bot, msg, nickname):
+def process_command(bot, msg, nickname, clid=None):
     """
     Process incoming messages and return response.
     
@@ -741,6 +741,7 @@ def process_command(bot, msg, nickname):
         bot: TS3Bot instance (has methods like masspoke, add_hunted, etc.)
         msg: Message text from user
         nickname: Nickname of user who sent message
+        clid: Client ID of user who sent message (optional)
     
     Returns:
         str: Response to send back to user
@@ -748,6 +749,7 @@ def process_command(bot, msg, nickname):
     
     if msg.startswith("!help"):
         return (
+            "\n"
             "[b][color=#FFD700]═════════════════════════════════════[/color][/b]\n"
             "[b][color=#4ECDC4]🤖 ROLLABOT - Available Commands[/color][/b]\n"
             "[b][color=#FFD700]═════════════════════════════════════[/color][/b]\n\n"
@@ -764,7 +766,11 @@ def process_command(bot, msg, nickname):
             "[b][color=#90EE90]!warexplog [days][/color][/b] - Show war exp history (default: 30 days)\n"
             "[b][color=#90EE90]!explog [minutes][/color][/b] - Show recent exp gains (default: 100 entries)\n"
             "[b][color=#90EE90]!showlogs[/color][/b] - Show last 100 warnings/errors\n"
+            "[b][color=#90EE90]!gohome[/color][/b] - Move you and the bot to Djinns channel\n"
+            "\n"
+            "[i]Note: [color=#A0A0A0]Obrigado Pedrin pelas apis que eu robei na cara dura.[/color][/i]\n"
             "[color=#505050]─────────────────────────────────────[/color]"
+
             # "!registerfriendlyexp - Register for friendly guild exp notifications\n"  # Commented out
             # "!unregisterfriendlyexp - Unregister from friendly guild exp notifications\n"  # Commented out
         )
@@ -776,7 +782,7 @@ def process_command(bot, msg, nickname):
     # Mass poke command
     if msg.startswith("!mp"):
         bot.masspoke(f"{nickname} te cutucou: {msg[4:]}")
-        return "[b][color=#4ECDC4]📢 Poking all clients...[/color][/b]"
+        return "\n[b][color=#4ECDC4]📢 Poking all clients...[/color][/b]"
     
     # Add to hunted list (via x3tBot)#hide from help since it's x3tBot specific
     #if msg.startswith("!hunted add"):
@@ -795,37 +801,37 @@ def process_command(bot, msg, nickname):
     if msg.startswith("!logger"):
         search_term = msg[7:].strip()
         if not search_term:
-            return "[color=#FF6B6B]Usage:[/color] [b]!logger[/b] [color=#A0A0A0]<uid/nickname/ip>[/color]"
-        return search_activity_log(search_term)
+            return "\n[color=#FF6B6B]Usage:[/color] [b]!logger[/b] [color=#A0A0A0]<uid/nickname/ip>[/color]"
+        return "\n" + search_activity_log(search_term)
     
     # Get recent logs by minutes
     if msg.startswith("!lastminuteslogs"):
         try:
             minutes_str = msg[16:].strip()
             if not minutes_str:
-                return "[color=#FF6B6B]Usage:[/color] [b]!lastminuteslogs[/b] [color=#A0A0A0]<minutes>[/color]\n[color=#90EE90]Example:[/color] !lastminuteslogs 5"
+                return "\n[color=#FF6B6B]Usage:[/color] [b]!lastminuteslogs[/b] [color=#A0A0A0]<minutes>[/color]\n[color=#90EE90]Example:[/color] !lastminuteslogs 5"
             
             minutes = int(minutes_str)
             if minutes <= 0:
-                return "[color=#FF6B6B]Minutes must be a positive number.[/color]"
+                return "\n[color=#FF6B6B]Minutes must be a positive number.[/color]"
             if minutes > 1440:  # 24 hours
-                return "[color=#FF6B6B]Maximum 1440 minutes (24 hours) allowed.[/color]"
+                return "\n[color=#FF6B6B]Maximum 1440 minutes (24 hours) allowed.[/color]"
             
-            return get_recent_logs(minutes)
+            return "\n" + get_recent_logs(minutes)
         except ValueError:
-            return "[color=#FF6B6B]Invalid number. Usage:[/color] [b]!lastminuteslogs[/b] [color=#A0A0A0]<minutes>[/color]"
+            return "\n[color=#FF6B6B]Invalid number. Usage:[/color] [b]!lastminuteslogs[/b] [color=#A0A0A0]<minutes>[/color]"
     
     # Get list of all users with their nicknames
     if msg.startswith("!users"):
-        return get_users_list()
+        return "\n" + get_users_list()
     
     # Get registered users count
     if msg.startswith("!registered"):
-        return get_registered_count()
+        return "\n" + get_registered_count()
     
     # Get bot uptime
     if msg.startswith("!uptime"):
-        return get_bot_uptime(bot)
+        return "\n" + get_bot_uptime(bot)
     
     # Register for guild exp notifications
     if msg.startswith("!registerexp"):
@@ -867,12 +873,12 @@ def process_command(bot, msg, nickname):
             
             if user_uid:
                 logger.debug(f"Registering user UID: {user_uid} for exp notifications")
-                return register_exp_user(user_uid)
+                return "\n" + register_exp_user(user_uid)
             else:
-                return "[color=#FF6B6B]Could not find your UID. Please wait a minute for data to refresh and try again.[/color]"
+                return "\n[color=#FF6B6B]Could not find your UID. Please wait a minute for data to refresh and try again.[/color]"
         except Exception as e:
             logger.error(f"Error in registerexp command: {e}")
-            return "[color=#FF0000]Error registering. Please try again.[/color]"
+            return "\n[color=#FF0000]Error registering. Please try again.[/color]"
     
     # Unregister from guild exp notifications
     if msg.startswith("!unregisterexp"):
@@ -904,12 +910,12 @@ def process_command(bot, msg, nickname):
                     logger.debug(f"Could not read reference data: {ref_error}")
             
             if user_uid:
-                return unregister_exp_user(user_uid)
+                return "\n" + unregister_exp_user(user_uid)
             else:
-                return "[color=#FF6B6B]Could not find your UID. Please wait a minute for data to refresh and try again.[/color]"
+                return "\n[color=#FF6B6B]Could not find your UID. Please wait a minute for data to refresh and try again.[/color]"
         except Exception as e:
             logger.error(f"Error in unregisterexp command: {e}")
-            return "[color=#FF0000]Error unregistering. Please try again.[/color]"
+            return "\n[color=#FF0000]Error unregistering. Please try again.[/color]"
     
     # COMMENTED OUT - Friendly guild exp commands not needed anymore
     # # Register for friendly guild exp notifications
@@ -998,13 +1004,13 @@ def process_command(bot, msg, nickname):
     if msg.startswith("!warexp"):
         try:
             if not hasattr(bot, 'war_stats_collector'):
-                return "[color=#FF6B6B]War statistics collector is not available.[/color]"
+                return "\n[color=#FF6B6B]War statistics collector is not available.[/color]"
             
             stats_data, last_update = bot.war_stats_collector.get_stats()
-            return format_war_stats(stats_data, last_update)
+            return "\n" + format_war_stats(stats_data, last_update)
         except Exception as e:
             logger.error(f"Error in warexp command: {e}")
-            return "[color=#FF0000]Error retrieving war statistics. Please try again.[/color]"
+            return "\n[color=#FF0000]Error retrieving war statistics. Please try again.[/color]"
     
     # War exp log command
     if msg.startswith("!warexplog"):
@@ -1017,14 +1023,14 @@ def process_command(bot, msg, nickname):
             else:
                 days = int(parts[1])
                 if days < 1 or days > 365:
-                    return "[color=#FF6B6B]Days must be between 1 and 365.[/color]"
+                    return "\n[color=#FF6B6B]Days must be between 1 and 365.[/color]"
             
-            return get_war_exp_log(days)
+            return "\n" + get_war_exp_log(days)
         except ValueError:
-            return "[color=#FF6B6B]Invalid number of days. Usage: !warexplog [days][/color]"
+            return "\n[color=#FF6B6B]Invalid number of days. Usage: !warexplog [days][/color]"
         except Exception as e:
             logger.error(f"Error in warexplog command: {e}")
-            return "[color=#FF0000]Error retrieving war exp log.[/color]"
+            return "\n[color=#FF0000]Error retrieving war exp log.[/color]"
     
     # Exp deltas log command
     if msg.startswith("!explog"):
@@ -1033,59 +1039,122 @@ def process_command(bot, msg, nickname):
             
             # Default to 100 entries if no parameter
             if len(parts) < 2:
-                return get_exp_log(minutes=None, entries=100)
+                return "\n" + get_exp_log(minutes=None, entries=100)
             else:
                 minutes = int(parts[1])
                 if minutes < 1 or minutes > 1440:  # Max 24 hours
-                    return "[color=#FF6B6B]Minutes must be between 1 and 1440.[/color]"
+                    return "\n[color=#FF6B6B]Minutes must be between 1 and 1440.[/color]"
                 
-                return get_exp_log(minutes=minutes)
+                return "\n" + get_exp_log(minutes=minutes)
         except ValueError:
-            return "[color=#FF6B6B]Invalid number of minutes. Usage: !explog [minutes][/color]"
+            return "\n[color=#FF6B6B]Invalid number of minutes. Usage: !explog [minutes][/color]"
         except Exception as e:
             logger.error(f"Error in explog command: {e}")
-            return "[color=#FF0000]Error retrieving exp log.[/color]"
+            return "\n[color=#FF0000]Error retrieving exp log.[/color]"
+    
+    # Go home command - move user and bot to Djinns channel
+    if msg.startswith("!gohome"):
+        try:
+            if clid is None:
+                return "\n[color=#FF6B6B]Client ID not available.[/color]"
+            
+            # Get bot's own client ID
+            try:
+                whoami = bot.worker_conn.whoami().parsed[0]
+                bot_clid = whoami.get('client_id', '')
+            except Exception as e:
+                logger.error(f"Error getting bot client ID: {e}")
+                return "\n[color=#FF0000]Error: Could not get bot client ID.[/color]"
+            
+            # Move both user and bot to Djinns
+            success = bot.move_to_djinns(clid, bot_clid)
+            
+            if success:
+                return "\n[b][color=#4ECDC4]🏠 Moving you and the bot to Djinns channel...[/color][/b]"
+            else:
+                return "\n[color=#FF6B6B]Failed to move to Djinns channel. Channel may not exist.[/color]"
+                
+        except Exception as e:
+            logger.error(f"Error in gohome command: {e}")
+            return "\n[color=#FF0000]Error executing gohome command.[/color]"
     
     # Show logs command
     if msg.startswith("!showlogs"):
         try:
             if not hasattr(bot, 'log_handler'):
-                return "[color=#FF6B6B]Log handler is not available.[/color]"
+                return "\n[color=#FF6B6B]Log handler is not available.[/color]"
             
             logs = bot.log_handler.get_logs(100)
             
             if not logs:
-                return "[color=#A0A0A0]No warnings or errors logged yet.[/color]"
+                return "\n[color=#A0A0A0]No warnings or errors logged yet.[/color]"
+            
+            # Group consecutive identical errors
+            grouped_logs = []
+            for log in reversed(logs):
+                log_key = (log.get('level', ''), log.get('message', ''), log.get('module', ''))
+                
+                if grouped_logs and grouped_logs[-1]['key'] == log_key:
+                    # Same as previous, increment count
+                    grouped_logs[-1]['count'] += 1
+                    grouped_logs[-1]['last_timestamp'] = log.get('timestamp', 'Unknown')
+                else:
+                    # New entry
+                    grouped_logs.append({
+                        'key': log_key,
+                        'timestamp': log.get('timestamp', 'Unknown'),
+                        'last_timestamp': log.get('timestamp', 'Unknown'),
+                        'level': log.get('level', 'UNKNOWN'),
+                        'message': log.get('message', ''),
+                        'module': log.get('module', ''),
+                        'count': 1
+                    })
             
             # Format output
             message = f"[b][color=#FFD700]═══ Bot Logs (Last {len(logs)} Entries) ═══[/color][/b]\n"
             message += "[color=#505050]" + "═" * 60 + "[/color]\n\n"
             
-            # Show in reverse order (newest first)
-            for log in reversed(logs):
-                timestamp = log.get('timestamp', 'Unknown')
-                level = log.get('level', 'UNKNOWN')
-                log_message = log.get('message', '')
-                module = log.get('module', '')
+            # Display grouped logs
+            for log in grouped_logs:
+                timestamp = log['timestamp']
+                last_timestamp = log['last_timestamp']
+                level = log['level']
+                log_message = log['message']
+                module = log['module']
+                count = log['count']
                 
                 # Color based on level
                 if level == 'ERROR' or level == 'CRITICAL':
                     level_color = '#FF6B6B'  # Red
+                    msg_color = '#FFB3B3'    # Light red
                 elif level == 'WARNING':
                     level_color = '#FFD700'  # Gold
+                    msg_color = '#FFEB99'    # Light gold
                 else:
                     level_color = '#A0A0A0'  # Gray
+                    msg_color = '#D0D0D0'    # Light gray
                 
-                message += f"[color=#A0A0A0]{timestamp}[/color] "
+                # Show time range if count > 1
+                if count > 1:
+                    time_display = f"{last_timestamp} - {timestamp}"
+                else:
+                    time_display = timestamp
+                
+                message += f"[color=#A0A0A0]{time_display}[/color] "
                 message += f"[b][color={level_color}]{level}[/color][/b] "
                 message += f"[color=#505050]({module})[/color]\n"
-                message += f"  [color=#FFFFFF]{log_message}[/color]\n\n"
+                
+                # Add count if more than 1
+                if count > 1:
+                    message += f"  [color={msg_color}]{log_message}[/color] [color=#00FF00](x{count})[/color]\n\n"
+                else:
+                    message += f"  [color={msg_color}]{log_message}[/color]\n\n"
             
             message += "[color=#505050]" + "═" * 60 + "[/color]"
-            return message
+            return "\n" + message
         except Exception as e:
             logger.error(f"Error in showlogs command: {e}")
-            return "[color=#FF0000]Error retrieving logs.[/color]"
+            return "\n[color=#FF0000]Error retrieving logs.[/color]"
     
     # Unknown command
 
@@ -1097,6 +1166,6 @@ def process_command(bot, msg, nickname):
         t=f"\n[color=#FF6B6B]{t.strip()}[/color]"
     else:
         t=""
-    default_response = f"[color=#A0A0A0]Esse não é o x3tbot. Digite[/color] [b][color=#4ECDC4]!help[/color][/b] [color=#A0A0A0]para ver os comandos disponíveis[/color] {t}"
+    default_response = f"\n[color=#A0A0A0]Esse não é o x3tbot. Digite[/color] [b][color=#4ECDC4]!help[/color][/b] [color=#A0A0A0]para ver os comandos disponíveis[/color] {t}"
     
     return str(default_response)
