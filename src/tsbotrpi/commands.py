@@ -35,7 +35,7 @@ def register_exp_user(uid: str) -> str:
         
         # Check if already registered
         if uid in registered_uids:
-            return "You are already registered for guild exp notifications."
+            return "[color=#FFD700]You are already registered for guild exp notifications.[/color]"
         
         # Add new UID
         registered_uids.add(uid)
@@ -46,11 +46,11 @@ def register_exp_user(uid: str) -> str:
                 f.write(f"{registered_uid}\n")
         
         logger.info(f"Registered {uid} for guild exp notifications")
-        return "Successfully registered for guild exp notifications!"
+        return "[b][color=#00FF00]✅ Successfully registered for guild exp notifications![/color][/b]"
         
     except Exception as e:
         logger.error(f"Error registering user for exp notifications: {e}")
-        return f"Error registering: {str(e)}"
+        return f"[color=#FF0000]Error registering: {str(e)}[/color]"
 
 
 def unregister_exp_user(uid: str) -> str:
@@ -68,7 +68,7 @@ def unregister_exp_user(uid: str) -> str:
         registered_file = os.path.join(log_dir, 'registered.txt')
         
         if not os.path.exists(registered_file):
-            return "You are not registered for guild exp notifications."
+            return "[color=#FFD700]You are not registered for guild exp notifications.[/color]"
         
         # Load existing UIDs
         registered_uids = set()
@@ -77,7 +77,7 @@ def unregister_exp_user(uid: str) -> str:
         
         # Check if registered
         if uid not in registered_uids:
-            return "You are not registered for guild exp notifications."
+            return "[color=#FFD700]You are not registered for guild exp notifications.[/color]"
         
         # Remove UID
         registered_uids.remove(uid)
@@ -88,11 +88,11 @@ def unregister_exp_user(uid: str) -> str:
                 f.write(f"{registered_uid}\n")
         
         logger.info(f"Unregistered {uid} from guild exp notifications")
-        return "Successfully unregistered from guild exp notifications."
+        return "[b][color=#00FF00]✅ Successfully unregistered from guild exp notifications.[/color][/b]"
         
     except Exception as e:
         logger.error(f"Error unregistering user from exp notifications: {e}")
-        return f"Error unregistering: {str(e)}"
+        return f"[color=#FF0000]Error unregistering: {str(e)}[/color]"
 
 
 # COMMENTED OUT - Friendly guild exp functions not needed anymore
@@ -179,6 +179,68 @@ def unregister_exp_user(uid: str) -> str:
 #         return f"Error unregistering: {str(e)}"
 
 
+def format_war_stats(data, last_update):
+    """
+    Format war statistics data in human-readable format.
+    
+    Args:
+        data: Dict with war stats from API
+        last_update: Datetime of last update
+    
+    Returns:
+        str: Formatted war stats
+    """
+    if not data:
+        return "[color=#FF6B6B]No war statistics available yet. Please wait for the first data collection.[/color]"
+    
+    try:
+        result = "[b][color=#FFD700]═══ WAR STATISTICS ═══[/color][/b]\n"
+        if last_update:
+            result += f"[color=#A0A0A0]Last Update: {last_update.strftime('%Y-%m-%d %H:%M:%S')}[/color]\n"
+        result += "[color=#505050]" + "═" * 50 + "[/color]\n\n"
+        
+        for key in ["shell", "ascended"]:
+            g = data.get(key, {})
+            guild_color = "#4ECDC4" if key == "shell" else "#FF6B9D"
+            
+            result += f"[b][color={guild_color}]⚔️ Guild: {key.upper()}[/color][/b]\n"
+            result += f"[color=#90EE90]● Online:[/color] [b]{g.get('totalOnline', 0)}[/b]\n"
+            result += f"[color=#98D8C8]▲ Total Gained:[/color] [b]{g.get('totalGained', 0):,}[/b]\n"
+            result += f"[color=#FF7F7F]▼ Total Lost:[/color] [b]{g.get('totalLost', 0):,}[/b]\n"
+            
+            net = g.get('totalGained', 0) - g.get('totalLost', 0)
+            net_color = "#00FF00" if net > 0 else "#FF0000" if net < 0 else "#FFFFFF"
+            result += f"[color=#FFD700]═ Net:[/color] [b][color={net_color}]{net:+,}[/color][/b]\n\n"
+            
+            membros = g.get("members", [])
+            
+            # Top 3 gains
+            gainers = sorted([m for m in membros if m.get("delta", 0) > 0], 
+                           key=lambda x: -x.get("delta", 0))[:3]
+            if gainers:
+                result += "[b][color=#00FF00]🏆 Top 3 Gains:[/color][/b]\n"
+                for i, m in enumerate(gainers, 1):
+                    result += f"  [color=#FFD700]{i}.[/color] [b]{m.get('name', 'Unknown')}[/b] - LV {m.get('level', '?')} - [color=#00FF00]Δ {m.get('delta', 0):+,}[/color]\n"
+                result += "\n"
+            
+            # Top 3 losses
+            losers = sorted([m for m in membros if m.get("delta", 0) < 0], 
+                          key=lambda x: x.get("delta", 0))[:3]
+            if losers:
+                result += "[b][color=#FF6B6B]💀 Top 3 Losses:[/color][/b]\n"
+                for i, m in enumerate(losers, 1):
+                    result += f"  [color=#FFD700]{i}.[/color] [b]{m.get('name', 'Unknown')}[/b] - LV {m.get('level', '?')} - [color=#FF6B6B]Δ {m.get('delta', 0):+,}[/color]\n"
+                result += "\n"
+            
+            result += "[color=#505050]" + "─" * 50 + "[/color]\n\n"
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error formatting war stats: {e}")
+        return f"[color=#FF0000]Error formatting war statistics: {str(e)}[/color]"
+
+
 def get_txt():
     api_url="https://xinga-me.appspot.com/api"
     try:
@@ -242,7 +304,7 @@ def get_recent_logs(minutes: int, max_results: int = 100):
         clients_ref_path = os.path.join(log_dir, 'clients_reference.csv')
         
         if not os.path.exists(readable_log_path):
-            return "Activity log not found. No events have been logged yet."
+            return "[color=#FF6B6B]Activity log not found. No events have been logged yet.[/color]"
         
         # Build UID to nickname mapping
         uid_to_nickname = {}
@@ -297,11 +359,11 @@ def get_recent_logs(minutes: int, max_results: int = 100):
                     continue
         
         if not matches:
-            return f"No activity found in the last {minutes} minute(s)."
+            return f"[color=#FF6B6B]No activity found in the last {minutes} minute(s).[/color]"
         
         # Format results
-        result = f"Activity from last {minutes} minute(s) ({len(matches)} events):\n"
-        result += "=" * 50 + "\n\n"
+        result = f"[b][color=#4ECDC4]📋 Activity from last {minutes} minute(s)[/color][/b] [color=#A0A0A0]({len(matches)} events)[/color]\n"
+        result += "[color=#505050]" + "═" * 50 + "[/color]\n\n"
         
         for i, match in enumerate(matches, 1):
             timestamp = match.get('TIMESTAMP', '')
@@ -311,17 +373,17 @@ def get_recent_logs(minutes: int, max_results: int = 100):
             # Get nickname from mapping, fallback to truncated UID
             nickname = uid_to_nickname.get(uid, uid[:12] + '...')
             
-            result += f"{i}. [{timestamp}] {nickname}\n"
-            result += f"   {event}\n\n"
+            result += f"[color=#FFD700]{i}.[/color] [color=#90EE90][{timestamp}][/color] [b]{nickname}[/b]\n"
+            result += f"   [color=#FFFFFF]{event}[/color]\n\n"
         
         if len(matches) == max_results:
-            result += f"(Showing first {max_results} results)"
+            result += f"[color=#A0A0A0](Showing first {max_results} results)[/color]"
         
         return result
         
     except Exception as e:
         logger.error(f"Error retrieving recent logs: {e}")
-        return f"Error retrieving logs: {str(e)}"
+        return f"[color=#FF0000]Error retrieving logs: {str(e)}[/color]"
 
 
 def get_registered_count():
@@ -336,15 +398,15 @@ def get_registered_count():
         registered_file = os.path.join(log_dir, 'registered.txt')
         
         if not os.path.exists(registered_file):
-            return "📋 No users registered for exp notifications."
+            return "[color=#FF6B6B]📋 No users registered for exp notifications.[/color]"
         
         with open(registered_file, 'r', encoding='utf-8') as f:
             count = len([line for line in f if line.strip()])
         
-        return f"📋 Users registered for exp notifications: {count}"
+        return f"[b][color=#4ECDC4]📋 Users registered for exp notifications:[/color][/b] [color=#FFD700]{count}[/color]"
     except Exception as e:
         logger.error(f"Error getting registered count: {e}")
-        return f"Error: {str(e)}"
+        return f"[color=#FF0000]Error: {str(e)}[/color]"
 
 
 def get_bot_uptime(bot):
@@ -362,8 +424,8 @@ def get_bot_uptime(bot):
         days = uptime.days
         hours, remainder = divmod(uptime.seconds, 3600)
         minutes, seconds = divmod(remainder, 60)
-        return f"⏱️ Bot uptime: {days}d {hours}h {minutes}m {seconds}s"
-    return "⏱️ Uptime information not available."
+        return f"[b][color=#4ECDC4]⏱️ Bot uptime:[/color][/b] [color=#FFD700]{days}d {hours}h {minutes}m {seconds}s[/color]"
+    return "[color=#FF6B6B]⏱️ Uptime information not available.[/color]"
 
 
 def get_users_list():
@@ -408,23 +470,23 @@ def get_users_list():
                         uid_nicknames[uid].add(nickname)
         
         if not uid_nicknames:
-            return "No user data available."
+            return "[color=#FF6B6B]No user data available.[/color]"
         
         # Format results
-        result = f"👥 Users List ({len(uid_nicknames)} unique UIDs):\n"
-        result += "=" * 50 + "\n\n"
+        result = f"[b][color=#4ECDC4]👥 Users List[/color][/b] [color=#A0A0A0]({len(uid_nicknames)} unique UIDs)[/color]\n"
+        result += "[color=#505050]" + "═" * 50 + "[/color]\n\n"
         
         for uid, nicknames in sorted(uid_nicknames.items()):
             # Truncate UID for display
             uid_display = uid[:12] + '...' if len(uid) > 12 else uid
-            nicks_list = ','.join(sorted(nicknames))
-            result += f"{uid_display} > {nicks_list}\n"
+            nicks_list = ', '.join(sorted(nicknames))
+            result += f"[color=#90EE90]{uid_display}[/color] [color=#FFD700]→[/color] [b]{nicks_list}[/b]\n"
         
         return result
         
     except Exception as e:
         logger.error(f"Error getting users list: {e}")
-        return f"Error: {str(e)}"
+        return f"[color=#FF0000]Error: {str(e)}[/color]"
 
 
 def search_activity_log(search_term: str, max_results: int = 50):
@@ -446,7 +508,7 @@ def search_activity_log(search_term: str, max_results: int = 50):
         clients_ref_path = os.path.join(log_dir, 'clients_reference.csv')
         
         if not os.path.exists(readable_log_path):
-            return "Activity log not found. No events have been logged yet."
+            return "[color=#FF6B6B]Activity log not found. No events have been logged yet.[/color]"
         
         # First, try to find UID from nickname or IP in both reference sources
         target_uids = set()
@@ -501,7 +563,7 @@ def search_activity_log(search_term: str, max_results: int = 50):
                     all_matches.append(row)
         
         if not all_matches:
-            return f"No activity found for: {search_term}"
+            return f"[color=#FF6B6B]No activity found for: {search_term}[/color]"
         
         # Take only the LAST max_results entries
         matches = all_matches[-max_results:]
@@ -515,21 +577,21 @@ def search_activity_log(search_term: str, max_results: int = 50):
                 nickname, ip = matched_user_info[uid]
                 user_display = f"{nickname} ({uid[:8]}...)"
         
-        result = f"Found {total_found} activities for '{user_display}' (showing last {len(matches)}):\n"
+        result = f"[b][color=#4ECDC4]🔍 Found {total_found} activities for '[/color][color=#FFD700]{user_display}[/color][color=#4ECDC4]'[/color][/b] [color=#A0A0A0](showing last {len(matches)})[/color]\n\n"
         for i, match in enumerate(matches, 1):
             timestamp = match.get('TIMESTAMP', '')
             event = match.get('EVENT', 'unknown event')
             
-            result += f"{i}. [{timestamp}] {event}\n"
+            result += f"[color=#FFD700]{i}.[/color] [color=#90EE90][{timestamp}][/color] {event}\n"
         
         if total_found > max_results:
-            result += f"\n(Showing last {max_results} of {total_found} total results)"
+            result += f"\n[color=#A0A0A0](Showing last {max_results} of {total_found} total results)[/color]"
         
         return result
         
     except Exception as e:
         logger.error(f"Error searching activity log: {e}")
-        return f"Error searching log: {str(e)}"
+        return f"[color=#FF0000]Error searching log: {str(e)}[/color]"
 
 
 def process_command(bot, msg, nickname):
@@ -547,16 +609,20 @@ def process_command(bot, msg, nickname):
     
     if msg.startswith("!help"):
         return (
-            "Available commands:\n"
-            "!help - Show this message\n"
-            "!mp <message> - Poka todo mundo , util se o x3tbot estiver offline\n"
-            "!logger <uid/nickname/ip> - Search activity log for user\n"
-            "!lastminuteslogs <minutes> - Get activity from last N minutes\n"
-            "!users - List all UIDs with their associated nicknames\n"
-            "!registered - Show number of users registered for exp\n"
-            "!uptime - Show bot uptime\n"
-            "!registerexp - Register for guild exp notifications\n"
-            "!unregisterexp - Unregister from guild exp notifications\n"
+            "[b][color=#FFD700]═════════════════════════════════════[/color][/b]\n"
+            "[b][color=#4ECDC4]🤖 ROLLABOT - Available Commands[/color][/b]\n"
+            "[b][color=#FFD700]═════════════════════════════════════[/color][/b]\n\n"
+            "[b][color=#90EE90]!help[/color][/b] - Show this message\n"
+            "[b][color=#90EE90]!mp[/color][/b] [color=#A0A0A0]<message>[/color] - Poke everyone (useful if x3tbot is offline)\n"
+            "[b][color=#90EE90]!logger[/color][/b] [color=#A0A0A0]<uid/nickname/ip>[/color] - Search activity log for user\n"
+            "[b][color=#90EE90]!lastminuteslogs[/color][/b] [color=#A0A0A0]<minutes>[/color] - Get activity from last N minutes\n"
+            "[b][color=#90EE90]!users[/color][/b] - List all UIDs with their associated nicknames\n"
+            "[b][color=#90EE90]!registered[/color][/b] - Show number of users registered for exp\n"
+            "[b][color=#90EE90]!uptime[/color][/b] - Show bot uptime\n"
+            "[b][color=#90EE90]!registerexp[/color][/b] - Register for guild exp notifications\n"
+            "[b][color=#90EE90]!unregisterexp[/color][/b] - Unregister from guild exp notifications\n"
+            "[b][color=#90EE90]!warexp[/color][/b] - Show war statistics (Shell vs Ascended)\n"
+            "[color=#505050]─────────────────────────────────────[/color]"
             # "!registerfriendlyexp - Register for friendly guild exp notifications\n"  # Commented out
             # "!unregisterfriendlyexp - Unregister from friendly guild exp notifications\n"  # Commented out
         )
@@ -568,7 +634,7 @@ def process_command(bot, msg, nickname):
     # Mass poke command
     if msg.startswith("!mp"):
         bot.masspoke(f"{nickname} te cutucou: {msg[4:]}")
-        return "Poking all clients..."
+        return "[b][color=#4ECDC4]📢 Poking all clients...[/color][/b]"
     
     # Add to hunted list (via x3tBot)#hide from help since it's x3tBot specific
     #if msg.startswith("!hunted add"):
@@ -587,7 +653,7 @@ def process_command(bot, msg, nickname):
     if msg.startswith("!logger"):
         search_term = msg[7:].strip()
         if not search_term:
-            return "Usage: !logger <uid/nickname/ip>"
+            return "[color=#FF6B6B]Usage:[/color] [b]!logger[/b] [color=#A0A0A0]<uid/nickname/ip>[/color]"
         return search_activity_log(search_term)
     
     # Get recent logs by minutes
@@ -595,17 +661,17 @@ def process_command(bot, msg, nickname):
         try:
             minutes_str = msg[16:].strip()
             if not minutes_str:
-                return "Usage: !lastminuteslogs <minutes>\nExample: !lastminuteslogs 5"
+                return "[color=#FF6B6B]Usage:[/color] [b]!lastminuteslogs[/b] [color=#A0A0A0]<minutes>[/color]\n[color=#90EE90]Example:[/color] !lastminuteslogs 5"
             
             minutes = int(minutes_str)
             if minutes <= 0:
-                return "Minutes must be a positive number."
+                return "[color=#FF6B6B]Minutes must be a positive number.[/color]"
             if minutes > 1440:  # 24 hours
-                return "Maximum 1440 minutes (24 hours) allowed."
+                return "[color=#FF6B6B]Maximum 1440 minutes (24 hours) allowed.[/color]"
             
             return get_recent_logs(minutes)
         except ValueError:
-            return "Invalid number. Usage: !lastminuteslogs <minutes>"
+            return "[color=#FF6B6B]Invalid number. Usage:[/color] [b]!lastminuteslogs[/b] [color=#A0A0A0]<minutes>[/color]"
     
     # Get list of all users with their nicknames
     if msg.startswith("!users"):
@@ -661,10 +727,10 @@ def process_command(bot, msg, nickname):
                 logger.debug(f"Registering user UID: {user_uid} for exp notifications")
                 return register_exp_user(user_uid)
             else:
-                return "Could not find your UID. Please wait a minute for data to refresh and try again."
+                return "[color=#FF6B6B]Could not find your UID. Please wait a minute for data to refresh and try again.[/color]"
         except Exception as e:
             logger.error(f"Error in registerexp command: {e}")
-            return "Error registering. Please try again."
+            return "[color=#FF0000]Error registering. Please try again.[/color]"
     
     # Unregister from guild exp notifications
     if msg.startswith("!unregisterexp"):
@@ -698,10 +764,10 @@ def process_command(bot, msg, nickname):
             if user_uid:
                 return unregister_exp_user(user_uid)
             else:
-                return "Could not find your UID. Please wait a minute for data to refresh and try again."
+                return "[color=#FF6B6B]Could not find your UID. Please wait a minute for data to refresh and try again.[/color]"
         except Exception as e:
             logger.error(f"Error in unregisterexp command: {e}")
-            return "Error unregistering. Please try again."
+            return "[color=#FF0000]Error unregistering. Please try again.[/color]"
     
     # COMMENTED OUT - Friendly guild exp commands not needed anymore
     # # Register for friendly guild exp notifications
@@ -786,6 +852,18 @@ def process_command(bot, msg, nickname):
     #         logger.error(f"Error in unregisterfriendlyexp command: {e}")
     #         return "Error unregistering. Please try again."
     
+    # War statistics command
+    if msg.startswith("!warexp"):
+        try:
+            if not hasattr(bot, 'war_stats_collector'):
+                return "[color=#FF6B6B]War statistics collector is not available.[/color]"
+            
+            stats_data, last_update = bot.war_stats_collector.get_stats()
+            return format_war_stats(stats_data, last_update)
+        except Exception as e:
+            logger.error(f"Error in warexp command: {e}")
+            return "[color=#FF0000]Error retrieving war statistics. Please try again.[/color]"
+    
     # Unknown command
 
 
@@ -793,9 +871,9 @@ def process_command(bot, msg, nickname):
 
     t=get_txt()
     if isinstance(t, str) and t.strip():
-        t=f"\n{t.strip()}"
+        t=f"\n[color=#FF6B6B]{t.strip()}[/color]"
     else:
         t=""
-    default_response = f"esse nao é o x3tbot, digite !help para ver os comandos disponiveis {t}"
+    default_response = f"[color=#A0A0A0]Esse não é o x3tbot. Digite[/color] [b][color=#4ECDC4]!help[/color][/b] [color=#A0A0A0]para ver os comandos disponíveis[/color] {t}"
     
     return str(default_response)

@@ -22,6 +22,62 @@ from .activity_logger import (
 logger = logging.getLogger(__name__)
 
 
+class WarStatsCollector:
+    """Collects war statistics from API every 3 minutes."""
+    
+    def __init__(self):
+        self.cache = None
+        self.last_update = None
+        self._running = False
+        self._thread = None
+        self.api_url = "https://check-morte-shellpatrocina.onrender.com/api/stats"
+        
+    def start(self):
+        """Start the collection thread."""
+        if self._thread is not None and self._thread.is_alive():
+            logger.warning("WarStatsCollector thread already running")
+            return
+        
+        self._running = True
+        self._thread = threading.Thread(target=self._collection_loop, daemon=True)
+        self._thread.start()
+        logger.info("WarStatsCollector thread started")
+    
+    def stop(self):
+        """Stop the collection thread."""
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=5)
+        logger.info("WarStatsCollector thread stopped")
+    
+    def _collection_loop(self):
+        """Main loop that collects stats every 3 minutes."""
+        while self._running:
+            try:
+                self._fetch_stats()
+                time.sleep(180)  # 3 minutes
+            except Exception as e:
+                logger.error(f"Error in WarStatsCollector loop: {e}", exc_info=True)
+                time.sleep(60)  # Wait 1 minute on error before retrying
+    
+    def _fetch_stats(self):
+        """Fetch stats from API and update cache."""
+        try:
+            response = requests.get(self.api_url, timeout=10)
+            response.raise_for_status()
+            self.cache = response.json()
+            self.last_update = datetime.now()
+            logger.debug("War stats updated successfully")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching war stats: {e}")
+        except ValueError as e:
+            logger.error(f"Error parsing war stats JSON: {e}")
+    
+    def get_stats(self):
+        """Get cached stats."""
+        return self.cache, self.last_update
+
+
 def timed(func):
     """Decorator to time and log function execution."""
     @wraps(func)
@@ -65,6 +121,9 @@ class TS3Bot:
         self.reference_manager = None
         self.users_seen_tracker = None
         self.human_readable_logger = None
+        
+        # War stats collector
+        self.war_stats_collector = WarStatsCollector()
         
         # Duplicate event prevention
         self.last_event = None
@@ -508,7 +567,7 @@ class TS3Bot:
             
             # Make request
             api_start = time.perf_counter()
-            response = None
+            response = None 
             for attempt in range(1, 4):  # 3 attempts
                 try:
                     timeout = 2 ** attempt  # Exponential: 2, 4, 8 seconds
@@ -1162,6 +1221,11 @@ class TS3Bot:
         self._reference_thread = threading.Thread(target=self._reference_data_loop, daemon=True)
         self._reference_thread.start()
         logger.info("Reference data collection thread started")
+        
+        # Start war stats collector thread
+        logger.info("Starting war stats collector...")
+        self.war_stats_collector.start()
+        logger.info("War stats collector started")
 
 
 
@@ -1285,6 +1349,11 @@ class TS3Bot:
                 self._worker_thread.join(timeout=5)
             if self._reference_thread:
                 self._reference_thread.join(timeout=5)
+            if self.war_stats_collector:
+                try:
+                    self.war_stats_collector.stop()
+                except Exception as e:
+                    logger.error(f"Error stopping war stats collector: {e}")
             if self.event_conn:
                 try:
                     self.event_conn.close()
