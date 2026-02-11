@@ -1126,7 +1126,8 @@ class TS3Bot:
                     # Send all chunks to this user
                     for chunk in message_chunks:
                         poke_start = time.perf_counter()
-                        self.worker_conn.clientpoke(clid=clid, msg=chunk)
+                        msg=chunk if chunk.startswith("\n") else "\n"+chunk
+                        self.worker_conn.clientpoke(clid=clid, msg=msg)
                         poke_time = (time.perf_counter() - poke_start) * 1000
                         logger.debug(f"⏱️ Clientpoke: {poke_time:.2f}ms")
                     
