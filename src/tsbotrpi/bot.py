@@ -2,6 +2,7 @@ import logging
 import time
 import threading
 import os
+import csv
 import ts3
 from datetime import datetime
 from urllib.parse import quote as encodeURIComponent
@@ -68,10 +69,99 @@ class WarStatsCollector:
             self.cache = response.json()
             self.last_update = datetime.now()
             logger.debug("War stats updated successfully")
+            
+            # Log to exps.csv (one row per day)
+            self._log_daily_stats(self.cache)
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching war stats: {e}")
         except ValueError as e:
             logger.error(f"Error parsing war stats JSON: {e}")
+    
+    def _log_daily_stats(self, data):
+        """Log daily war statistics to exps.csv."""
+        try:
+            log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            exps_file = os.path.join(log_dir, 'exps.csv')
+            
+            if not data:
+                return
+            
+            # Calculate totals for each guild
+            ascendant_exp = 0
+            shellpatrocina_exp = 0
+            score_ascendant = 0
+            score_shellpatrocina = 0
+            
+            ascendant_data = data.get('Ascendant', {})
+            shell_data = data.get('Shell', {})
+            
+            # Sum up exp deltas
+            for member in ascendant_data.get('members', []):
+                delta = member.get('delta', 0)
+                ascendant_exp += delta
+                if delta < 0:  # Death = score point
+                    score_shellpatrocina += 1
+            
+            for member in shell_data.get('members', []):
+                delta = member.get('delta', 0)
+                shellpatrocina_exp += delta
+                if delta < 0:  # Death = score point
+                    score_ascendant += 1
+            
+            today = datetime.now().strftime('%d/%m/%Y')
+            
+            # Check if file exists and read existing data
+            file_exists = os.path.exists(exps_file)
+            updated = False
+            
+            if file_exists:
+                # Read all rows
+                rows = []
+                with open(exps_file, 'r', newline='', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if row.get('date') == today:
+                            # Update existing row for today
+                            row['ascendant_exp'] = str(ascendant_exp)
+                            row['shellpatrocina_exp'] = str(shellpatrocina_exp)
+                            row['score_ascendant'] = str(score_ascendant)
+                            row['score_shellpatrocina'] = str(score_shellpatrocina)
+                            updated = True
+                        rows.append(row)
+                
+                # Write back all rows
+                with open(exps_file, 'w', newline='', encoding='utf-8') as f:
+                    fieldnames = ['date', 'ascendant_exp', 'shellpatrocina_exp', 'score_ascendant', 'score_shellpatrocina']
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(rows)
+                    
+                    # Add new row if not updated
+                    if not updated:
+                        writer.writerow({
+                            'date': today,
+                            'ascendant_exp': ascendant_exp,
+                            'shellpatrocina_exp': shellpatrocina_exp,
+                            'score_ascendant': score_ascendant,
+                            'score_shellpatrocina': score_shellpatrocina
+                        })
+            else:
+                # Create new file with header
+                with open(exps_file, 'w', newline='', encoding='utf-8') as f:
+                    fieldnames = ['date', 'ascendant_exp', 'shellpatrocina_exp', 'score_ascendant', 'score_shellpatrocina']
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerow({
+                        'date': today,
+                        'ascendant_exp': ascendant_exp,
+                        'shellpatrocina_exp': shellpatrocina_exp,
+                        'score_ascendant': score_ascendant,
+                        'score_shellpatrocina': score_shellpatrocina
+                    })
+            
+            logger.debug(f"Logged daily stats to exps.csv: Asc={ascendant_exp}, Shell={shellpatrocina_exp}")
+        except Exception as e:
+            logger.error(f"Error logging daily stats: {e}", exc_info=True)
     
     def get_stats(self):
         """Get cached stats."""
@@ -476,6 +566,7 @@ class TS3Bot:
         
         last_reference_update = 0
         last_guild_exp_check = 0
+        last_channel_move = 0
         while self._running:
             
             if time.time() - last_reference_update > 300:  # Every 5 minutes
@@ -488,6 +579,12 @@ class TS3Bot:
                 last_guild_exp_check = time.time()
                 self.command_queue.put({'type': 'guild_exp_check'})
                 self.command_queue.put({'type': 'send_pokes'})
+            
+            # Move to Djinns channel every 2 minutes
+            if time.time() - last_channel_move > 120:  # Every 2 minutes
+                last_channel_move = time.time()
+                self.command_queue.put({'type': 'move_to_djinns'})
+            
             time.sleep(1)
         
         logger.info("Reference data collection thread stopped")
@@ -607,8 +704,12 @@ class TS3Bot:
             # Update timestamp
             self.last_guild_refresh_ts = current_refresh_ts
             
-            # Get members with exp gains
-            members_with_gains = [m for m in data.get('members', []) if m.get('delta_experience', 0) > 0]
+            # Get members with exp gains, sorted by delta_experience (highest first)
+            members_with_gains = sorted(
+                [m for m in data.get('members', []) if m.get('delta_experience', 0) > 0],
+                key=lambda m: m.get('delta_experience', 0),
+                reverse=True
+            )
             
             if not members_with_gains:
                 logger.debug("No guild members with exp gains")
@@ -616,8 +717,12 @@ class TS3Bot:
             
             # Format notification message
             refresh_time = datetime.fromtimestamp(current_refresh_ts).strftime('%d/%m/%Y %H:%M:%S')
-            message = f"Guild Exp Update ({refresh_time}):\n"
-            message += "=" * 50 + "\n\n"
+            message = f"[b][color=#FFD700]═══ Guild Exp Update ═══[/color][/b]\n"
+            message += f"[color=#A0A0A0]{refresh_time}[/color]\n"
+            message += "[color=#505050]" + "═" * 50 + "[/color]\n\n"
+            
+            # Log individual exp deltas to exp_deltas.csv
+            self._log_exp_deltas(members_with_gains)
             
             for member in members_with_gains:
                 name = member.get('name', 'Unknown')
@@ -628,8 +733,8 @@ class TS3Bot:
                 # Format exp with thousands separator
                 delta_exp_formatted = f"{delta_exp:,}"
                 
-                message += f"{name} (Lvl {level} {vocation})\n"
-                message += f"  +{delta_exp_formatted} exp\n\n"
+                message += f"[b][color=#4ECDC4]{name}[/color][/b] [color=#A0A0A0](Lvl {level} {vocation})[/color]\n"
+                message += f"  [color=#00FF00]⬆ +{delta_exp_formatted} exp[/color]\n\n"
             
             logger.info(f"Guild exp gains detected for {len(members_with_gains)} members")
             
@@ -666,6 +771,86 @@ class TS3Bot:
             logger.warning(f"Failed to fetch guild exp data: {e}")
         except Exception as e:
             logger.error(f"Error in guild exp check: {e}")
+    
+    @timed
+    def _do_move_to_djinns(self):
+        """Move bot to Djinns channel."""
+        try:
+            target_channel_name = "╠═● Djinns"
+            
+            # Get channel ID from reference manager
+            if not self.reference_manager:
+                logger.warning("Reference manager not available for channel move")
+                return
+            
+            # Search for channel in reference data
+            channel_id = None
+            
+            for cid, channel_name in self.reference_manager.channel_map.items():
+                if channel_name == target_channel_name:
+                    channel_id = cid
+                    break
+            
+            if not channel_id:
+                logger.warning(f"Channel '{target_channel_name}' not found in reference data")
+                return
+            
+            # Get bot's own client ID
+            try:
+                whoami = self.worker_conn.whoami().parsed[0]
+                clid = whoami.get('client_id', '')
+                
+                if not clid:
+                    logger.warning("Could not get bot's client ID")
+                    return
+                
+                # Move to target channel
+                self.worker_conn.clientmove(cid=channel_id, clid=clid)
+                logger.debug(f"Moved to channel '{target_channel_name}' (cid={channel_id})")
+                
+            except Exception as e:
+                error_str = str(e).lower()
+                if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
+                    logger.warning(f"Connection error during channel move: {e}")
+                    self.worker_conn = None
+                else:
+                    logger.error(f"Error moving to channel: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Error in channel move: {e}", exc_info=True)
+    
+    def _log_exp_deltas(self, members_with_gains):
+        """Log individual exp deltas to exp_deltas.csv."""
+        try:
+            log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            exp_deltas_file = os.path.join(log_dir, 'exp_deltas.csv')
+            
+            timestamp = datetime.now().strftime('%d/%m/%Y %H:%M')
+            
+            # Check if file exists
+            file_exists = os.path.exists(exp_deltas_file)
+            
+            # Append exp deltas
+            with open(exp_deltas_file, 'a', newline='', encoding='utf-8') as f:
+                fieldnames = ['timedate', 'name', 'exp']
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                
+                if not file_exists:
+                    writer.writeheader()
+                
+                for member in members_with_gains:
+                    name = member.get('name', 'Unknown')
+                    delta_exp = member.get('delta_experience', 0)
+                    
+                    writer.writerow({
+                        'timedate': timestamp,
+                        'name': name,
+                        'exp': f"+{delta_exp}"
+                    })
+            
+            logger.debug(f"Logged {len(members_with_gains)} exp deltas to exp_deltas.csv")
+        except Exception as e:
+            logger.error(f"Error logging exp deltas: {e}", exc_info=True)
     
     # COMMENTED OUT - Friendly guild exp checking not needed anymore
     # def _check_friendly_guild_exp(self):
@@ -1156,6 +1341,14 @@ class TS3Bot:
                         # Guild exp check request
                         logger.debug("Processing guild exp check")
                         self._check_guild_exp()
+                    
+                    elif isinstance(item, dict) and item.get('type') == 'move_to_djinns':
+                        # Move to Djinns channel request
+                        if not self.worker_conn or not self.worker_conn.is_connected():
+                            logger.warning("Worker connection not available, skipping channel move")
+                        else:
+                            logger.debug("Processing channel move to Djinns")
+                            self._do_move_to_djinns()
                     
                     process_time = (time.perf_counter() - process_start) * 1000
                     logger.debug(f"⏱️ Total item processing: {process_time:.2f}ms")
