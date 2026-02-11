@@ -794,7 +794,7 @@ class TS3Bot:
             refresh_time = datetime.fromtimestamp(current_refresh_ts).strftime('%d/%m/%Y %H:%M:%S')
             message = f"[b][color=#FFD700]═══ Guild Exp Update ═══[/color][/b]\n"
             message += f"[color=#A0A0A0]{refresh_time}[/color]\n"
-            message += "[color=#505050]" + "═" * 50 + "[/color]\n\n"
+            #message += "[color=#505050]" + "═" * 50 + "[/color]\n\n"
             
             # Log individual exp deltas to exp_deltas.csv
             self._log_exp_deltas(members_with_gains)
