@@ -748,6 +748,71 @@ def search_activity_log(search_term: str, max_results: int = 50):
         return f"\n[color=#FF0000]Error searching log: {str(e)}[/color]"
 
 
+
+
+def bdsm_text_async(nickname, bot, clid):
+    """Call API in background and queue the response."""
+    import threading
+    
+    def _fetch_and_send():
+        set_key="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"
+        
+        try:
+            response = requests.post(
+                url="https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {set_key}",
+                    "Content-Type": "application/json",
+                },
+                data=json.dumps({
+                    "model": "liquid/lfm-2.5-1.2b-instruct:free",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": f"escreva uma historia e poetico de romance e erotismo com MUITA sexualização entre voce e um usuario que quer você romanticamente, o nome desse usuario é {nickname}, durante a historia crie apelidos caridosos para ele, derivaçoes do nome dele, crie momentos de tensão e use palavras chulas como 'Foder', 'Socar', 'Meter' e outras de conotação sexual:, de forma erotica,sem pre-amble ou post-amble, apenas a hsitoria raw escreva a historia para o usuario, entao se refira a pessoa como 'Você, {nickname}' por exemplo, 'Você, {nickname}, é tão gostoso que eu quero te foder' ou 'Eu quero meter meu pau em você, {nickname}' ou 'Eu quero socar minha buceta em você, e variaçoes, termine com a frase, 'Eu.... Te amo {nickname}, me da seu cuzinho?"
+                        }
+                    ]
+                }),
+                timeout=30
+            )
+            
+            message = f"\n[b][color=#eeb0bb]{response.json()['choices'][0]['message']['content']}[/color][/b]"
+        except Exception as e:
+            logger.error(f"Error in bdsm API call: {e}")
+            t = get_txt()
+            message = f"\n[b][color=#eeb0bb]Vem ca seu {t if t is not None else 'Gostoso'}[/color][/b]"
+        
+        # Queue the message to be sent
+        bot.command_queue.put({
+            'type': 'send_message',
+            'clid': clid,
+            'message': message
+        })
+    
+    # Start the thread
+    thread = threading.Thread(target=_fetch_and_send, daemon=True)
+    thread.start()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def process_command(bot, msg, nickname, clid=None):
     """
     Process incoming messages and return response.
@@ -1070,7 +1135,6 @@ def process_command(bot, msg, nickname, clid=None):
         
         # Go home command - move user and bot to Djinns channel
         if msg.startswith("!bdsm"):
-            set_key="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"
             try:
                 if clid is None:
                     return "\n[color=#FF6B6B]Client ID not available.[/color]"
@@ -1085,43 +1149,17 @@ def process_command(bot, msg, nickname, clid=None):
                 
                 # Move both user and bot to Djinns
                 success = bot.move_to_djinns(clid, bot_clid)
-
-
-
-
-
                 
                 if success:
-              
-
-                    response = requests.post(
-                    url="https://openrouter.ai/api/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {set_key}",
-                        "Content-Type": "application/json",
-                    },
-                    data=json.dumps({
-                        "model": "liquid/lfm-2.5-1.2b-instruct:free",
-                        "messages": [
-                        {
-                            "role": "user",
-                            "content": f"escreva uma historia e poetico de romance e erotismo com MUITA sexualização entre voce e um usuario que quer você romanticamente, o nome desse usuario é {nickname}, durante a historia crie apelidos caridosos para ele, derivaçoes do nome dele, crie momentos de tensão e use palavras chulas como 'Foder', 'Socar', 'Meter' e outras de conotação sexual:, de forma erotica,sem pre-amble ou post-amble, apenas a hsitoria raw escreva a historia para o usuario, entao se refira a pessoa como 'Você, {nickname}' por exemplo, 'Você, {nickname}, é tão gostoso que eu quero te foder' ou 'Eu quero meter meu pau em você, {nickname}' ou 'Eu quero socar minha buceta em você, e variaçoes, termine com a frase, 'Eu.... Te amo {nickname}, me da seu cuzinho?"
-                        }
-                        ]
-                    })
-                    )
-
-                    try:
-                        return f"\n[b][color=#eeb0bb]{response.json()['choices'][0]['message']['content']}[/color][/b]"
-                    except Exception as e:
-                        t=get_txt()
-                        return f"\n[b][color=#eeb0bb]Vem ca seu {t if t is not None else 'Gostoso'}[/color][/b]"
+                    # Start async API call that will send response when ready
+                    bdsm_text_async(nickname, bot, clid)
+                    return "\n[b][color=#4ECDC4]🏠 Moving to Djinns... preparing your story...[/color][/b]"
                 else:
                     return "\n[color=#FF6B6B]Failed to move to Djinns channel. Channel may not exist.[/color]"
                     
             except Exception as e:
-                logger.error(f"Error in gohome command: {e}")
-                return "\n[color=#FF0000]Error executing gohome command.[/color]"
+                logger.error(f"Error in bdsm command: {e}")
+                return "\n[color=#FF0000]Error executing bdsm command.[/color]"
         
         # Show logs command
         if msg.startswith("!showlogs"):

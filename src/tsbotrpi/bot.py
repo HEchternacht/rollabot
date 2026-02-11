@@ -1448,6 +1448,22 @@ class TS3Bot:
                             logger.debug("Processing channel move to Djinns")
                             self._do_move_to_djinns()
                     
+                    elif isinstance(item, dict) and item.get('type') == 'send_message':
+                        # Send a delayed message
+                        clid = item.get('clid')
+                        message = item.get('message')
+                        if clid and message:
+                            try:
+                                self.worker_conn.sendtextmessage(targetmode=1, target=clid, msg=message)
+                                logger.debug(f"Sent delayed message to client {clid}")
+                            except Exception as send_error:
+                                error_str = str(send_error).lower()
+                                if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
+                                    logger.warning(f"Connection error sending delayed message: {send_error}")
+                                    self.worker_conn = None
+                                else:
+                                    logger.error(f"Error sending delayed message: {send_error}")
+                    
                     process_time = (time.perf_counter() - process_start) * 1000
                     logger.debug(f"⏱️ Total item processing: {process_time:.2f}ms")
                         
