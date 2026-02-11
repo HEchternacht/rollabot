@@ -1154,7 +1154,7 @@ def process_command(bot, msg, nickname, clid=None):
                 if success:
                     # Start async API call that will send response when ready
                     
-                    return "\n[b][color=#4ECDC4]🏠 Moving to Djinns... preparing your story...[/color][/b]"
+                    return "\n[b][color=#4ECDC4]Hmmmm...[/color][/b]"
                 else:
                     return "\n[color=#FF6B6B]Failed to move to Djinns channel. Channel may not exist.[/color]"
                     
