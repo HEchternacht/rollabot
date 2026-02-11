@@ -810,35 +810,20 @@ class TS3Bot:
         try:
             target_channel_name = "djinn"
             
-            # Get channel ID from reference manager
-            if not self.reference_manager:
-                logger.warning("Reference manager not available for channel move")
-                return
-            
-            # Search for channel in reference data
-            channel_id = None
-            
-            for cid, channel_name in self.reference_manager.channel_map.items():
-                if channel_name.lower() in target_channel_name.lower():
-                    channel_id = cid
-                    break
-            
-            if not channel_id:
-                logger.warning(f"Channel '{target_channel_name}' not found in reference data")
-                return
+ 
             
             # Get bot's own client ID
             try:
                 whoami = self.worker_conn.whoami().parsed[0]
-                clid = whoami.get('client_id', '')
+                clid = whoami.get('clid', '')
                 
                 if not clid:
                     logger.warning("Could not get bot's client ID")
                     return
                 
                 # Move to target channel
-                self.worker_conn.clientmove(cid=channel_id, clid=clid)
-                logger.debug(f"Moved to channel '{target_channel_name}' (cid={channel_id})")
+                self.worker_conn.clientmove(cid=161, clid=clid)
+                logger.debug(f"Moved to channel '{target_channel_name}' (cid=161)")
                 
             except Exception as e:
                 error_str = str(e).lower()
@@ -859,29 +844,13 @@ class TS3Bot:
         """
         try:
             target_channel_name = "djinn"
-            
-            # Get channel ID from reference manager
-            if not self.reference_manager:
-                logger.warning("Reference manager not available for channel move")
-                return False
-            
-            # Search for channel in reference data
-            channel_id = None
-            
-            for cid, channel_name in self.reference_manager.channel_map.items():
-                if channel_name.lower() in target_channel_name.lower():
-                    channel_id = cid
-                    break
-            
-            if not channel_id:
-                logger.warning(f"Channel '{target_channel_name}' not found in reference data")
-                return False
+            #selfclid=self.conn.whoami().parsed[-1]['clid']
             
             # Move each client to target channel
             try:
                 for clid in clids:
-                    self.worker_conn.clientmove(cid=channel_id, clid=clid)
-                    logger.debug(f"Moved client {clid} to channel '{target_channel_name}' (cid={channel_id})")
+                    self.worker_conn.clientmove(cid=161, clid=clid)
+                    logger.debug(f"Moved client {clid} to channel '{target_channel_name}' (cid=161)")
                 
                 return True
                 

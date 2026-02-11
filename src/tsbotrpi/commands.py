@@ -1061,7 +1061,7 @@ def process_command(bot, msg, nickname, clid=None):
             # Get bot's own client ID
             try:
                 whoami = bot.worker_conn.whoami().parsed[0]
-                bot_clid = whoami.get('client_id', '')
+                bot_clid = whoami.get('clid', '')
             except Exception as e:
                 logger.error(f"Error getting bot client ID: {e}")
                 return "\n[color=#FF0000]Error: Could not get bot client ID.[/color]"
