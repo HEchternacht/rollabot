@@ -12,12 +12,12 @@ logger = logging.getLogger(__name__)
 import requests
 
 
-def get_war_exp_log(days: int) -> str:
+def get_war_exp_log(days: int = 30) -> str:
     """
     Get war exp log for the last N days.
     
     Args:
-        days: Number of days to retrieve
+        days: Number of days to retrieve (default: 30)
     
     Returns:
         str: Formatted war exp log
@@ -42,34 +42,39 @@ def get_war_exp_log(days: int) -> str:
         # Get last N days
         rows = rows[-days:] if days < len(rows) else rows
         
-        # Format output
+        # Format output with new style
         message = f"[b][color=#FFD700]═══ War Exp Log (Last {days} Days) ═══[/color][/b]\n"
-        message += "[color=#505050]" + "═" * 50 + "[/color]\n\n"
+        message += "[color=#505050]" + "═" * 60 + "[/color]\n\n"
         
         for row in rows:
             date = row.get('date', 'Unknown')
             asc_exp = int(row.get('ascendant_exp', 0))
             shell_exp = int(row.get('shellpatrocina_exp', 0))
-            asc_score = row.get('score_ascendant', 0)
-            shell_score = row.get('score_shellpatrocina', 0)
+            asc_score = int(row.get('score_ascendant', 0))
+            shell_score = int(row.get('score_shellpatrocina', 0))
             
-            message += f"[b][color=#A0A0A0]{date}[/color][/b]\n"
-            message += f"[color=#FF6B9D]Ascendant:[/color] {asc_exp:,} exp [color=#00FF00]({asc_score} kills)[/color]\n"
-            message += f"[color=#4ECDC4]ShellPatrocina:[/color] {shell_exp:,} exp [color=#00FF00]({shell_score} kills)[/color]\n"
-            message += "[color=#505050]" + "─" * 30 + "[/color]\n"
+            # Format: day > Ascendant <score> <exp> X <exp> <score> ShellPatrocina
+            message += f"[color=#A0A0A0]{date}[/color] [color=#505050]>[/color] "
+            message += f"[b][color=#FF6B9D]Ascendant[/color][/b] "
+            message += f"[color=#00FF00]{asc_score}[/color] [color=#FFD700]{asc_exp:,}[/color] "
+            message += f"[b][color=#FFFFFF]X[/color][/b] "
+            message += f"[color=#FFD700]{shell_exp:,}[/color] [color=#00FF00]{shell_score}[/color] "
+            message += f"[b][color=#4ECDC4]ShellPatrocina[/color][/b]\n"
         
+        message += "\n[color=#505050]" + "═" * 60 + "[/color]"
         return message
     except Exception as e:
         logger.error(f"Error reading war exp log: {e}", exc_info=True)
         return "[color=#FF0000]Error reading war exp log.[/color]"
 
 
-def get_exp_log(minutes: int) -> str:
+def get_exp_log(minutes: int = None, entries: int = 100) -> str:
     """
-    Get exp deltas for the last N minutes.
+    Get exp deltas for the last N minutes or last N entries.
     
     Args:
-        minutes: Number of minutes to retrieve
+        minutes: Number of minutes to retrieve (optional)
+        entries: Number of entries to retrieve if minutes not specified (default: 100)
     
     Returns:
         str: Formatted exp deltas log
@@ -82,48 +87,51 @@ def get_exp_log(minutes: int) -> str:
             return "[color=#FF6B6B]No exp deltas log found.[/color]"
         
         # Read all rows
-        rows = []
-        cutoff_time = datetime.now() - timedelta(minutes=minutes)
-        
+        all_rows = []
         with open(exp_deltas_file, 'r', newline='', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
+                all_rows.append(row)
+        
+        if not all_rows:
+            return "[color=#FF6B6B]No exp deltas available.[/color]"
+        
+        # Filter by time or get last N entries
+        rows = []
+        if minutes is not None:
+            cutoff_time = datetime.now() - timedelta(minutes=minutes)
+            for row in all_rows:
                 try:
-                    # Parse timedate
                     timedate_str = row.get('timedate', '')
                     row_time = datetime.strptime(timedate_str, '%d/%m/%Y %H:%M')
-                    
                     if row_time >= cutoff_time:
                         rows.append(row)
                 except ValueError:
                     continue
+            
+            if not rows:
+                return f"[color=#FF6B6B]No exp deltas in the last {minutes} minutes.[/color]"
+            
+            header = f"[b][color=#FFD700]═══ Exp Deltas (Last {minutes} Minutes) ═══[/color][/b]"
+        else:
+            # Get last N entries
+            rows = all_rows[-entries:] if entries < len(all_rows) else all_rows
+            header = f"[b][color=#FFD700]═══ Exp Deltas (Last {len(rows)} Entries) ═══[/color][/b]"
         
-        if not rows:
-            return f"[color=#FF6B6B]No exp deltas in the last {minutes} minutes.[/color]"
+        # Format output - simple list format
+        message = header + "\n"
+        message += "[color=#505050]" + "═" * 60 + "[/color]\n\n"
         
-        # Format output
-        message = f"[b][color=#FFD700]═══ Exp Deltas (Last {minutes} Minutes) ═══[/color][/b]\n"
-        message += "[color=#505050]" + "═" * 50 + "[/color]\n\n"
-        
-        # Group by timedate
-        grouped = {}
-        for row in rows:
+        # Show in reverse order (newest first)
+        for row in reversed(rows):
             timedate = row.get('timedate', 'Unknown')
-            if timedate not in grouped:
-                grouped[timedate] = []
-            grouped[timedate].append(row)
-        
-        for timedate in sorted(grouped.keys(), reverse=True):
-            message += f"[b][color=#A0A0A0]{timedate}[/color][/b]\n"
+            name = row.get('name', 'Unknown')
+            exp = row.get('exp', '0')
             
-            for row in grouped[timedate]:
-                name = row.get('name', 'Unknown')
-                exp = row.get('exp', '0')
-                
-                message += f"  [color=#4ECDC4]{name}[/color]: [color=#00FF00]{exp} exp[/color]\n"
-            
-            message += "\n"
+            # Format: <daytime> <name> <deltexp>
+            message += f"[color=#A0A0A0]{timedate}[/color] [color=#4ECDC4]{name}[/color] [color=#00FF00]{exp}[/color]\n"
         
+        message += "\n[color=#505050]" + "═" * 60 + "[/color]"
         return message
     except Exception as e:
         logger.error(f"Error reading exp deltas log: {e}", exc_info=True)
@@ -753,8 +761,8 @@ def process_command(bot, msg, nickname):
             "[b][color=#90EE90]!registerexp[/color][/b] - Register for guild exp notifications\n"
             "[b][color=#90EE90]!unregisterexp[/color][/b] - Unregister from guild exp notifications\n"
             "[b][color=#90EE90]!warexp[/color][/b] - Show war statistics (Shell vs Ascended)\n"
-            "[b][color=#90EE90]!warexplog <days>[/color][/b] - Show war exp history\n"
-            "[b][color=#90EE90]!explog <minutes>[/color][/b] - Show recent exp gains\n"
+            "[b][color=#90EE90]!warexplog [days][/color][/b] - Show war exp history (default: 30 days)\n"
+            "[b][color=#90EE90]!explog [minutes][/color][/b] - Show recent exp gains (default: 100 entries)\n"
             "[color=#505050]─────────────────────────────────────[/color]"
             # "!registerfriendlyexp - Register for friendly guild exp notifications\n"  # Commented out
             # "!unregisterfriendlyexp - Unregister from friendly guild exp notifications\n"  # Commented out
@@ -1001,16 +1009,18 @@ def process_command(bot, msg, nickname):
     if msg.startswith("!warexplog"):
         try:
             parts = msg.split()
-            if len(parts) < 2:
-                return "[color=#FF6B6B]Usage: !warexplog <days>[/color]"
             
-            days = int(parts[1])
-            if days < 1 or days > 365:
-                return "[color=#FF6B6B]Days must be between 1 and 365.[/color]"
+            # Default to 30 days if no parameter
+            if len(parts) < 2:
+                days = 30
+            else:
+                days = int(parts[1])
+                if days < 1 or days > 365:
+                    return "[color=#FF6B6B]Days must be between 1 and 365.[/color]"
             
             return get_war_exp_log(days)
         except ValueError:
-            return "[color=#FF6B6B]Invalid number of days. Usage: !warexplog <days>[/color]"
+            return "[color=#FF6B6B]Invalid number of days. Usage: !warexplog [days][/color]"
         except Exception as e:
             logger.error(f"Error in warexplog command: {e}")
             return "[color=#FF0000]Error retrieving war exp log.[/color]"
@@ -1019,16 +1029,18 @@ def process_command(bot, msg, nickname):
     if msg.startswith("!explog"):
         try:
             parts = msg.split()
+            
+            # Default to 100 entries if no parameter
             if len(parts) < 2:
-                return "[color=#FF6B6B]Usage: !explog <minutes>[/color]"
-            
-            minutes = int(parts[1])
-            if minutes < 1 or minutes > 1440:  # Max 24 hours
-                return "[color=#FF6B6B]Minutes must be between 1 and 1440.[/color]"
-            
-            return get_exp_log(minutes)
+                return get_exp_log(minutes=None, entries=100)
+            else:
+                minutes = int(parts[1])
+                if minutes < 1 or minutes > 1440:  # Max 24 hours
+                    return "[color=#FF6B6B]Minutes must be between 1 and 1440.[/color]"
+                
+                return get_exp_log(minutes=minutes)
         except ValueError:
-            return "[color=#FF6B6B]Invalid number of minutes. Usage: !explog <minutes>[/color]"
+            return "[color=#FF6B6B]Invalid number of minutes. Usage: !explog [minutes][/color]"
         except Exception as e:
             logger.error(f"Error in explog command: {e}")
             return "[color=#FF0000]Error retrieving exp log.[/color]"

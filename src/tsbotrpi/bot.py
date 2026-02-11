@@ -776,7 +776,7 @@ class TS3Bot:
     def _do_move_to_djinns(self):
         """Move bot to Djinns channel."""
         try:
-            target_channel_name = "╠═● Djinns"
+            target_channel_name = "djinn"
             
             # Get channel ID from reference manager
             if not self.reference_manager:
@@ -787,7 +787,7 @@ class TS3Bot:
             channel_id = None
             
             for cid, channel_name in self.reference_manager.channel_map.items():
-                if channel_name == target_channel_name:
+                if channel_name.lower() in target_channel_name.lower():
                     channel_id = cid
                     break
             
