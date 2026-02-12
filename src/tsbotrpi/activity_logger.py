@@ -553,6 +553,105 @@ class ActivityLogger:
                 self.csv_writer = None
 
 
+class UIDNicknamesTracker:
+    """Tracks all nicknames ever used by each UID."""
+    
+    def __init__(self, csv_path: str):
+        """
+        Initialize UID nicknames tracker.
+        
+        Args:
+            csv_path: Path to uid_nicknames.csv
+        """
+        self.csv_path = csv_path
+        self.uid_nicknames = {}  # uid -> set of nicknames
+        
+        # Load existing data
+        self._load_existing()
+    
+    def _load_existing(self):
+        """Load existing UID-nickname mappings from CSV."""
+        if not os.path.exists(self.csv_path):
+            return
+        
+        try:
+            with open(self.csv_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    uid = row.get('UID', '').strip()
+                    nickname = row.get('NICKNAME', '').strip()
+                    
+                    if uid and nickname:
+                        if uid not in self.uid_nicknames:
+                            self.uid_nicknames[uid] = set()
+                        self.uid_nicknames[uid].add(nickname)
+            
+            logger.info(f"Loaded {len(self.uid_nicknames)} UIDs with nicknames from uid_nicknames.csv")
+        except Exception as e:
+            logger.error(f"Failed to load uid_nicknames.csv: {e}")
+    
+    def add_users(self, clients: list):
+        """
+        Add/update users from client list.
+        
+        Args:
+            clients: List of client dicts with uid and nickname
+        """
+        try:
+            new_entries = []
+            
+            for client in clients:
+                uid = client.get('client_unique_identifier', '') or client.get('uid', '')
+                nickname = client.get('client_nickname', '') or client.get('nickname', '')
+                
+                # Skip if either field is empty
+                if not uid or not nickname:
+                    continue
+                
+                # Check if this is a new nickname for this UID
+                if uid not in self.uid_nicknames:
+                    self.uid_nicknames[uid] = set()
+                
+                if nickname not in self.uid_nicknames[uid]:
+                    self.uid_nicknames[uid].add(nickname)
+                    new_entries.append((uid, nickname))
+            
+            # Append new entries to CSV
+            if new_entries:
+                file_exists = os.path.exists(self.csv_path)
+                with open(self.csv_path, 'a', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    
+                    if not file_exists:
+                        writer.writerow(['UID', 'NICKNAME'])
+                    
+                    for uid, nickname in new_entries:
+                        writer.writerow([uid, nickname])
+                
+                logger.info(f"Added {len(new_entries)} new UID-nickname mappings to uid_nicknames.csv")
+        
+        except Exception as e:
+            logger.error(f"Failed to add UID-nickname mappings: {e}")
+    
+    def get_all_mappings(self):
+        """
+        Get all UID-nickname mappings.
+        
+        Returns:
+            dict: Dictionary of uid -> set of nicknames
+        """
+        return self.uid_nicknames.copy()
+    
+    def get_multi_nickname_users(self):
+        """
+        Get UIDs that have used multiple nicknames.
+        
+        Returns:
+            dict: Dictionary of uid -> set of nicknames (only users with >1 nickname)
+        """
+        return {uid: nicks for uid, nicks in self.uid_nicknames.items() if len(nicks) > 1}
+
+
 class ClientListLogger:
     """Logs client list snapshots with timestamps."""
 

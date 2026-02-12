@@ -5,6 +5,8 @@ Edit this file to add/modify bot commands.
 import logging
 import csv
 import os
+import time
+import threading
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
@@ -582,24 +584,26 @@ def get_bot_uptime(bot):
     return "[color=#FF6B6B]⏱️ Uptime information not available.[/color]"
 
 
-def get_users_list():
+def get_users_list(plus_mode=False):
     """
     Get list of all UIDs with their associated nicknames.
+    
+    Args:
+        plus_mode: If True, only show users with multiple nicknames
     
     Returns:
         str: Formatted list of UIDs and nicknames
     """
     try:
         log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        users_seen_path = os.path.join(log_dir, 'users_seen.csv')
-        clients_ref_path = os.path.join(log_dir, 'clients_reference.csv')
+        uid_nicknames_path = os.path.join(log_dir, 'uid_nicknames.csv')
         
         # Dictionary to store uid -> set of nicknames
         uid_nicknames = {}
         
-        # Read from users_seen.csv (historical data)
-        if os.path.exists(users_seen_path):
-            with open(users_seen_path, 'r', newline='', encoding='utf-8') as f:
+        # Read from uid_nicknames.csv
+        if os.path.exists(uid_nicknames_path):
+            with open(uid_nicknames_path, 'r', newline='', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     uid = row.get('UID', '').strip()
@@ -610,37 +614,134 @@ def get_users_list():
                             uid_nicknames[uid] = set()
                         uid_nicknames[uid].add(nickname)
         
-        # Read from clients_reference.csv (current data)
-        if os.path.exists(clients_ref_path):
-            with open(clients_ref_path, 'r', newline='', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    uid = row.get('uid', '').strip()
-                    nickname = row.get('nickname', '').strip()
-                    
-                    if uid and nickname:
-                        if uid not in uid_nicknames:
-                            uid_nicknames[uid] = set()
-                        uid_nicknames[uid].add(nickname)
-        
         if not uid_nicknames:
             return "[color=#FF6B6B]No user data available.[/color]"
         
+        # Filter for plus mode (only users with >1 nickname)
+        if plus_mode:
+            uid_nicknames = {uid: nicks for uid, nicks in uid_nicknames.items() if len(nicks) > 1}
+            
+            if not uid_nicknames:
+                return "[color=#FF6B6B]No users with multiple nicknames found.[/color]"
+        
         # Format results
-        result = f"[b][color=#4ECDC4]👥 Users List[/color][/b] [color=#A0A0A0]({len(uid_nicknames)} unique UIDs)[/color]\n"
+        mode_text = " Plus" if plus_mode else ""
+        result = f"[b][color=#4ECDC4]👥 Users List{mode_text}[/color][/b] [color=#A0A0A0]({len(uid_nicknames)} unique UIDs)[/color]\n"
         result += "[color=#505050]" + "═" * 50 + "[/color]\n\n"
         
         for uid, nicknames in sorted(uid_nicknames.items()):
             # Truncate UID for display
             uid_display = uid[:12] + '...' if len(uid) > 12 else uid
             nicks_list = ', '.join(sorted(nicknames))
-            result += f"[color=#90EE90]{uid_display}[/color] [color=#FFD700]→[/color] [b]{nicks_list}[/b]\n"
+            
+            # Add nickname count if more than 1
+            if len(nicknames) > 1:
+                result += f"[color=#90EE90]{uid_display}[/color] [color=#FFD700]→[/color] [b]{nicks_list}[/b] [color=#FF69B4]({len(nicknames)} names)[/color]\n"
+            else:
+                result += f"[color=#90EE90]{uid_display}[/color] [color=#FFD700]→[/color] [b]{nicks_list}[/b]\n"
         
         return result
         
     except Exception as e:
         logger.error(f"Error getting users list: {e}")
         return f"[color=#FF0000]Error: {str(e)}[/color]"
+
+
+def get_channel_list():
+    """
+    Get list of all channels with their IDs.
+    
+    Returns:
+        str: Formatted list of channel IDs and names
+    """
+    try:
+        log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        channels_ref_path = os.path.join(log_dir, 'channels_reference.csv')
+        
+        # Dictionary to store cid -> channel name
+        channels = {}
+        
+        # Read from channels_reference.csv
+        if os.path.exists(channels_ref_path):
+            with open(channels_ref_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    cid = row.get('cid', '').strip()
+                    channel_name = row.get('channel_name', '').strip()
+                    
+                    if cid and channel_name:
+                        channels[cid] = channel_name
+        
+        if not channels:
+            return "[color=#FF6B6B]No channel data available.[/color]"
+        
+        # Format results
+        result = f"[b][color=#4ECDC4]📋 Channels List[/color][/b] [color=#A0A0A0]({len(channels)} channels)[/color]\\n"
+        result += "[color=#505050]" + "═" * 50 + "[/color]\\n\\n"
+        
+        for cid, channel_name in sorted(channels.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0):
+            result += f"[color=#90EE90]{cid}[/color] [color=#FFD700]→[/color] [b]{channel_name}[/b]\\n"
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error getting channel list: {e}")
+        return f"[color=#FF0000]Error: {str(e)}[/color]"
+
+
+def periodic_kick_channel(bot, channel_id: str, duration_minutes: int, thread_id: str):
+    """
+    Monitor a channel and kick anyone who enters for a specified duration.
+    
+    Args:
+        bot: TS3Bot instance
+        channel_id: Channel ID to monitor and kick users from
+        duration_minutes: Duration in minutes to monitor the channel
+        thread_id: Unique thread identifier
+    """
+    try:
+        end_time = time.time() + (duration_minutes * 60)
+        check_interval = 10  # Check every 10 seconds
+        kicked_uids = set()  # Track kicked users to show unique count
+        
+        logger.info(f"PKC {thread_id}: Starting channel {channel_id} monitoring for {duration_minutes} minutes")
+        
+        # Initial kick of everyone in the channel (reason will be auto-formatted with time remaining)
+        result = bot.kick_channel_users(channel_id)
+        if result['success']:
+            logger.info(f"PKC {thread_id}: Initial kick - {result['kicked_count']} users removed from channel {channel_id}")
+        
+        # Monitor loop
+        while time.time() < end_time:
+            time.sleep(check_interval)
+            
+            # Check if still running (in case bot is shutting down)
+            if not bot._running:
+                break
+            
+            # Check for users in the channel and kick them (reason will be auto-formatted with time remaining)
+            try:
+                result = bot.kick_channel_users(channel_id)
+                if result['success'] and result['kicked_count'] > 0:
+                    logger.info(f"PKC {thread_id}: Kicked {result['kicked_count']} users from channel {channel_id}")
+            except Exception as e:
+                logger.warning(f"PKC {thread_id}: Error during check kick: {e}")
+        
+        remaining_time = max(0, int((end_time - time.time()) / 60))
+        if remaining_time == 0:
+            logger.info(f"PKC {thread_id}: Channel {channel_id} monitoring completed after {duration_minutes} minutes")
+        else:
+            logger.info(f"PKC {thread_id}: Channel {channel_id} monitoring stopped early")
+        
+    except Exception as e:
+        logger.error(f"PKC {thread_id}: Error in channel monitoring thread: {e}", exc_info=True)
+    
+    finally:
+        # Remove channel from active monitoring
+        with bot.pkc_lock:
+            if channel_id in bot.active_pkc_channels:
+                del bot.active_pkc_channels[channel_id]
+            logger.debug(f"PKC {thread_id}: Channel {channel_id} removed from active monitoring")
 
 
 def search_activity_log(search_term: str, max_results: int = 50):
@@ -839,6 +940,8 @@ def process_command(bot, msg, nickname, clid=None):
                 "[b][color=#FFD700]!logger[/color][/b] [color=#A0A0A0]<uid/nickname/ip>[/color] - Search activity log for user\n"
                 "[b][color=#9ACD32]!lastminuteslogs[/color][/b] [color=#A0A0A0]<minutes>[/color] - Get activity from last N minutes\n"
                 "[b][color=#32CD32]!users[/color][/b] - List all UIDs with their associated nicknames\n"
+                "[b][color=#228B22]!users plus[/color][/b] - List only users with multiple nicknames\n"
+                "[b][color=#20B2AA]!channelids[/color][/b] - List all channels with their IDs\n"
                 "[b][color=#00CED1]!registered[/color][/b] - Show number of users registered for exp\n"
                 "[b][color=#1E90FF]!uptime[/color][/b] - Show bot uptime\n"
                 "[b][color=#4169E1]!registerexp[/color][/b] - Register for guild exp notifications\n"
@@ -848,6 +951,7 @@ def process_command(bot, msg, nickname, clid=None):
                 "[b][color=#FF4500]!explog [minutes][/color][/b] - Show recent exp gains (default: 100 entries)\n"
                 "[b][color=#FF8C00]!showlogs[/color][/b] - Show last 100 warnings/errors\n"
                 "[b][color=#FFD700]!bdsm[/color][/b] - Move you and the bot to Djinns channel\n"
+                "[b][color=#DC143C]!pkc[/color][/b] [color=#A0A0A0]<channel> <minutes>[/color] - Lock channel for duration (max 3 active)\n"
                 "\n"
                 "[i]Note: [color=#A0A0A0]Obrigado Pedrin pelas apis que eu robei na cara dura.[/color][/i]\n"
                 "[color=#8B8B8B]─────────────────────────────────────[/color]"
@@ -904,7 +1008,72 @@ def process_command(bot, msg, nickname, clid=None):
         
         # Get list of all users with their nicknames
         if msg.startswith("!users"):
-            return "\n" + get_users_list()
+            # Check for "plus" mode
+            if "plus" in msg.lower():
+                return "\n" + get_users_list(plus_mode=True)
+            else:
+                return "\n" + get_users_list(plus_mode=False)
+        
+        # Get list of all channels with their IDs
+        if msg.startswith("!channelids"):
+            return "\n" + get_channel_list()
+        
+        # Periodic kick channel command
+        if msg.startswith("!pkc"):
+            try:
+                # Parse command: !pkc <channel_id> <duration_minutes>
+                parts = msg.split()
+                
+                if len(parts) < 3:
+                    return "\n[color=#FF6B6B]Usage:[/color] [b]!pkc[/b] [color=#A0A0A0]<channel_id> <duration_minutes>[/color]\n[color=#90EE90]Example:[/color] !pkc 5 30 (lock channel 5 for 30 minutes)"
+                
+                channel_id = parts[1]
+                duration_minutes = int(parts[2])
+                
+                # Validate parameters
+                if duration_minutes < 1:
+                    return "\n[color=#FF6B6B]Duration must be at least 1 minute.[/color]"
+                
+                if duration_minutes > 180:
+                    return "\n[color=#FF6B6B]Maximum duration is 180 minutes (3 hours).[/color]"
+                
+                # Check if max concurrent channels reached
+                with bot.pkc_lock:
+                    if len(bot.active_pkc_channels) >= 3:
+                        return "\n[color=#FF6B6B]Max monitored channels active (3/3). Please wait for one to complete.[/color]"
+                    
+                    # Check if channel already being monitored
+                    if channel_id in bot.active_pkc_channels:
+                        return f"\n[color=#FF6B6B]Channel {channel_id} is already being monitored.[/color]"
+                    
+                    # Create thread info
+                    thread_id = f"pkc_{channel_id}_{int(time.time())}"
+                    thread = threading.Thread(
+                        target=periodic_kick_channel,
+                        args=(bot, channel_id, duration_minutes, thread_id),
+                        daemon=True
+                    )
+                    
+                    # Add to active channels
+                    end_time = time.time() + (duration_minutes * 60)
+                    bot.active_pkc_channels[channel_id] = {
+                        'thread_id': thread_id,
+                        'thread': thread,
+                        'end_time': end_time,
+                        'duration_minutes': duration_minutes,
+                        'started': datetime.now()
+                    }
+                    
+                    # Start thread
+                    thread.start()
+                
+                return f"\n[b][color=#4ECDC4]🔒 Channel {channel_id} locked for {duration_minutes} minutes.[/color][/b]\n[color=#A0A0A0]Active monitors: {len(bot.active_pkc_channels)}/3[/color]"
+                    
+            except ValueError:
+                return "\n[color=#FF6B6B]Invalid parameters. Usage:[/color] [b]!pkc[/b] [color=#A0A0A0]<channel_id> <duration_minutes>[/color]"
+            except Exception as e:
+                logger.error(f"Error in !pkc command: {e}")
+                return f"\n[color=#FF0000]Error: {str(e)}[/color]"
         
         # Get registered users count
         if msg.startswith("!registered"):
@@ -913,6 +1082,30 @@ def process_command(bot, msg, nickname, clid=None):
         # Get bot uptime
         if msg.startswith("!uptime"):
             return "\n" + get_bot_uptime(bot)
+        
+        # Get command history (hidden from !help)
+        if msg.startswith("!history"):
+            try:
+                history = list(bot.command_history)
+                if not history:
+                    return "\n[color=#FF6B6B]No command history available.[/color]"
+                
+                # Reverse to show most recent first
+                history.reverse()
+                
+                message = "[b][color=#FFD700]═══ Command History ═══[/color][/b]\n"
+                message += "[color=#505050]" + "═" * 60 + "[/color]\n\n"
+                
+                for timestamp, nickname, command in history:
+                    message += f"[color=#A0A0A0]{timestamp}[/color] [color=#505050]-[/color] "
+                    message += f"[color=#4ECDC4]{nickname}[/color] [color=#505050]-[/color] "
+                    message += f"[color=#FFD700]{command}[/color]\n"
+                
+                message += "\n[color=#505050]" + "═" * 60 + "[/color]"
+                return "\n" + message
+            except Exception as e:
+                logger.error(f"Error retrieving command history: {e}")
+                return "\n[color=#FF0000]Error retrieving command history.[/color]"
         
         # Register for guild exp notifications
         if msg.startswith("!registerexp"):

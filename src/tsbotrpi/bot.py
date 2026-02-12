@@ -16,7 +16,8 @@ from .activity_logger import (
     ActivityLogger, 
     ClientListLogger, 
     ReferenceDataManager, 
-    UsersSeenTracker, 
+    UsersSeenTracker,
+    UIDNicknamesTracker,
     HumanReadableActivityLogger
 )
 
@@ -238,6 +239,7 @@ class TS3Bot:
         # New components
         self.reference_manager = None
         self.users_seen_tracker = None
+        self.uid_nicknames_tracker = None
         self.human_readable_logger = None
         
         # War stats collector
@@ -258,6 +260,13 @@ class TS3Bot:
         self.log_handler = MemoryLogHandler(maxlen=100)
         self.log_handler.setFormatter(logging.Formatter('%(name)s - %(message)s'))
         logging.getLogger().addHandler(self.log_handler)
+        
+        # Command history tracking for !history command
+        self.command_history = deque(maxlen=200)  # FIFO with max 200 entries: (datetime, nickname, command)
+        
+        # Periodic kick channel tracking
+        self.active_pkc_channels = {}  # Dict of channel_id -> {'thread': Thread, 'end_time': timestamp, 'thread_id': str}
+        self.pkc_lock = threading.Lock()  # Lock for thread-safe access to active channels dict
 
     @timed
     def _ensure_server_connection(self, conn=None, conn_name="connection"):
@@ -336,6 +345,10 @@ class TS3Bot:
                 # Users seen tracker
                 users_seen_path = os.path.join(log_dir, 'users_seen.csv')
                 self.users_seen_tracker = UsersSeenTracker(users_seen_path)
+                
+                # UID nicknames tracker
+                uid_nicknames_path = os.path.join(log_dir, 'uid_nicknames.csv')
+                self.uid_nicknames_tracker = UIDNicknamesTracker(uid_nicknames_path)
                 
                 # Human-readable activity logger
                 human_log_path = os.path.join(log_dir, 'activity_log_readable.csv')
@@ -565,6 +578,63 @@ class TS3Bot:
         
         return chunks
     
+    def kick_channel_users(self, channel_id: str, reason: str = "Kicked by bot"):
+        """
+        Kick all users from a specific channel from the server.
+        Uses worker_conn for thread-safe operation.
+        
+        Args:
+            channel_id: Channel ID to kick users from
+            reason: Kick reason message (will be auto-formatted if channel is PKC monitored)
+            
+        Returns:
+            dict: Result with 'success' (bool), 'kicked_count' (int), 'error' (str if failed)
+        """
+        try:
+            # Check if worker connection is available
+            if not self.worker_conn or not self.worker_conn.is_connected():
+                return {'success': False, 'kicked_count': 0, 'error': 'Worker connection not available'}
+            
+            # Calculate time remaining if this is a PKC monitored channel
+            kick_reason = reason
+            with self.pkc_lock:
+                if channel_id in self.active_pkc_channels:
+                    end_time = self.active_pkc_channels[channel_id]['end_time']
+                    remaining_seconds = max(0, int(end_time - time.time()))
+                    remaining_minutes = remaining_seconds // 60
+                    remaining_secs = remaining_seconds % 60
+                    kick_reason = f"Channel lock for {remaining_minutes}:{remaining_secs:02d} minutes"
+            
+            # Get all clients
+            clients = self.worker_conn.clientlist(cid=True).parsed
+            
+            kicked_count = 0
+            for client in clients:
+                # Skip if not in target channel
+                if str(client.get('cid', '')) != str(channel_id):
+                    continue
+                
+                # Skip bot itself
+                client_type = client.get('client_type', '')
+                if client_type == '1':  # ServerQuery client (bot)
+                    continue
+                
+                clid = client.get('clid', '')
+                if clid:
+                    try:
+                        # Kick from server (reasonid=5)
+                        self.worker_conn.clientkick(reasonid=5, clid=clid, reasonmsg=kick_reason)
+                        kicked_count += 1
+                        logger.debug(f"Kicked client {clid} from channel {channel_id}: {kick_reason}")
+                    except Exception as kick_error:
+                        logger.warning(f"Failed to kick client {clid}: {kick_error}")
+            
+            return {'success': True, 'kicked_count': kicked_count, 'error': None}
+            
+        except Exception as e:
+            logger.error(f"Error kicking channel users: {e}")
+            return {'success': False, 'kicked_count': 0, 'error': str(e)}
+    
     def masspoke(self, msg):
         """Poke all connected clients."""
         clients = self.conn.clientlist().parsed
@@ -700,6 +770,11 @@ class TS3Bot:
                 # Update users seen tracker
                 if self.users_seen_tracker:
                     self.users_seen_tracker.add_users(clients)
+                
+                # Update UID nicknames tracker
+                if self.uid_nicknames_tracker:
+                    self.uid_nicknames_tracker.add_users(clients)
+                
                 update_time = (time.perf_counter() - update_start) * 1000
                 logger.debug(f"⏱️ Update reference managers: {update_time:.2f}ms")
                 
@@ -1257,6 +1332,25 @@ class TS3Bot:
                 self._log_activity('clientmoved', clid, event_data)
                 logger.debug(f"Client moved: clid={clid} from {event_data.get('cfid')} to {event_data.get('ctid')}")
                 
+                # Check if moved to a monitored PKC channel
+                target_channel = str(event_data.get('ctid', ''))
+                with self.pkc_lock:
+                    if target_channel in self.active_pkc_channels:
+                        # Calculate remaining time
+                        end_time = self.active_pkc_channels[target_channel]['end_time']
+                        remaining_seconds = max(0, int(end_time - time.time()))
+                        remaining_minutes = remaining_seconds // 60
+                        remaining_secs = remaining_seconds % 60
+                        kick_reason = f"Channel lock for {remaining_minutes}:{remaining_secs:02d} minutes"
+                        
+                        # Queue kick operation to worker thread
+                        self.command_queue.put({
+                            'type': 'kick_user',
+                            'clid': clid,
+                            'reason': kick_reason
+                        })
+                        logger.debug(f"PKC: Queued kick for client {clid} trying to enter monitored channel {target_channel}: {kick_reason}")
+                
             elif event_type == 'notifyclientupdated':
                 # Client updated - only log if nickname or mute status changed
                 if any(key in event_data for key in ['client_nickname', 'client_input_muted', 'client_output_muted']):
@@ -1407,6 +1501,11 @@ class TS3Bot:
                         msg, clid, nickname = item
                         logger.debug(f"Processing command from {nickname}: {msg[:20]}...")
                         
+                        # Track command in history (except !history itself)
+                        if msg.startswith('!') and not msg.startswith('!history'):
+                            timestamp = datetime.now().strftime('%d/%m/%Y %H:%M')
+                            self.command_history.append((timestamp, nickname, msg))
+                        
                         cmd_start = time.perf_counter()
                         response = process_command(self, msg, nickname, clid)
                         cmd_time = (time.perf_counter() - cmd_start) * 1000
@@ -1471,6 +1570,23 @@ class TS3Bot:
                                     self.worker_conn = None
                                 else:
                                     logger.error(f"Error sending delayed message: {send_error}")
+                    
+                    elif isinstance(item, dict) and item.get('type') == 'kick_user':
+                        # Kick a specific user from server (PKC event-based kick)
+                        clid = item.get('clid')
+                        reason = item.get('reason', 'Kicked by bot')
+                        
+                        if clid:
+                            try:
+                                self.worker_conn.clientkick(reasonid=5, clid=clid, reasonmsg=reason)
+                                logger.info(f"PKC: Event-kicked client {clid}: {reason}")
+                            except Exception as kick_error:
+                                error_str = str(kick_error).lower()
+                                if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
+                                    logger.warning(f"Connection error kicking client: {kick_error}")
+                                    self.worker_conn = None
+                                else:
+                                    logger.error(f"Error kicking client {clid}: {kick_error}")
                     
                     process_time = (time.perf_counter() - process_start) * 1000
                     logger.debug(f"⏱️ Total item processing: {process_time:.2f}ms")
