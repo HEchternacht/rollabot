@@ -1179,7 +1179,7 @@ def process_command(bot, msg, nickname, clid=None):
             ]
 
 
-            return f"\n[b][color=#228B22]O respawn ([b]{random.choice(resp_choices)}[/b]) é seu agora. O limite de tempo neste respawn é de [b]03:00[/b]"
+            return f"[b][color=#228B22]O respawn ([b]{random.choice(resp_choices)}[/b]) é seu agora. O limite de tempo neste respawn é de [b]03:00[/b]"
 
 
 
