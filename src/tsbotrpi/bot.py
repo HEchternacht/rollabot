@@ -267,6 +267,7 @@ class TS3Bot:
         # Periodic kick channel tracking
         self.active_pkc_channels = {}  # Dict of channel_id -> {'thread': Thread, 'end_time': timestamp, 'thread_id': str}
         self.pkc_lock = threading.Lock()  # Lock for thread-safe access to active channels dict
+        self.pending_pkc_kicks = {}  # Dict of clid -> {'channel_id': str, 'scheduled_time': float}
 
     @timed
     def _ensure_server_connection(self, conn=None, conn_name="connection"):
@@ -1332,25 +1333,29 @@ class TS3Bot:
                 self._log_activity('clientmoved', clid, event_data)
                 logger.debug(f"Client moved: clid={clid} from {event_data.get('cfid')} to {event_data.get('ctid')}")
                 
-                # Check if moved to a monitored PKC channel
+                source_channel = str(event_data.get('cfid', ''))
                 target_channel = str(event_data.get('ctid', ''))
+                
+                # Check if moved FROM a monitored PKC channel (cancel pending kick)
+                with self.pkc_lock:
+                    if source_channel in self.active_pkc_channels:
+                        # User left a monitored channel, cancel pending kick
+                        self.command_queue.put({
+                            'type': 'pkc_cancel_kick',
+                            'clid': clid
+                        })
+                        logger.debug(f"PKC: Queued cancel kick for client {clid} leaving monitored channel {source_channel}")
+                
+                # Check if moved TO a monitored PKC channel (warn user)
                 with self.pkc_lock:
                     if target_channel in self.active_pkc_channels:
-                        # Calculate remaining time
-                        end_time = self.active_pkc_channels[target_channel]['end_time']
-                        remaining_seconds = max(0, int(end_time - time.time()))
-                        remaining_minutes = remaining_seconds // 60
-                        remaining_secs = remaining_seconds % 60
-                        kick_reason = f"Channel lock for {remaining_minutes}:{remaining_secs:02d} minutes"
-                        
-                        # Queue kick operation to worker thread (with channel_id for logging)
+                        # User entered a monitored channel, warn them
                         self.command_queue.put({
-                            'type': 'kick_user',
+                            'type': 'pkc_warn_user',
                             'clid': clid,
-                            'reason': kick_reason,
-                            'channel_id': target_channel  # For PKC logging
+                            'channel_id': target_channel
                         })
-                        logger.debug(f"PKC: Queued kick for client {clid} trying to enter monitored channel {target_channel}: {kick_reason}")
+                        logger.debug(f"PKC: Queued warning for client {clid} entering monitored channel {target_channel}")
                 
             elif event_type == 'notifyclientupdated':
                 # Client updated - only log if nickname or mute status changed
@@ -1572,28 +1577,104 @@ class TS3Bot:
                                 else:
                                     logger.error(f"Error sending delayed message: {send_error}")
                     
-                    elif isinstance(item, dict) and item.get('type') == 'kick_user':
-                        # Kick a specific user from server (PKC event-based kick)
+                    elif isinstance(item, dict) and item.get('type') == 'pkc_warn_user':
+                        # Warn user they will be kicked if they stay in the channel
                         clid = item.get('clid')
-                        reason = item.get('reason', 'Kicked by bot')
-                        channel_id = item.get('channel_id')  # For PKC logging
+                        channel_id = item.get('channel_id')
                         
-                        if clid:
+                        if clid and channel_id:
                             try:
-                                self.worker_conn.clientkick(reasonid=5, clid=clid, reasonmsg=reason)
-                                logger.info(f"PKC: Event-kicked client {clid}: {reason}")
+                                # Calculate kick time (30 seconds from now)
+                                kick_time = time.time() + 30
+                                kick_datetime = datetime.fromtimestamp(kick_time).strftime('%H:%M')
                                 
-                                # Log to pkc.csv if channel_id is provided (event-based kick)
-                                if channel_id:
+                                # Store in pending kicks
+                                with self.pkc_lock:
+                                    self.pending_pkc_kicks[clid] = {
+                                        'channel_id': channel_id,
+                                        'scheduled_time': kick_time
+                                    }
+                                
+                                # Get nickname from client_map
+                                nickname = self.client_map.get(clid, {}).get('nickname', 'Unknown')
+                                
+                                # Poke user with warning
+                                warning_msg = f"\n[b][color=#FF4500]⚠️ WARNING ⚠️[/color][/b]\n[color=#FFD700]You will be kicked from server in 30s (at {kick_datetime}) if you stay in this channel[/color]"
+                                self.worker_conn.clientpoke(clid=clid, msg=warning_msg)
+                                logger.info(f"PKC: Warned client {clid} ({nickname}) in channel {channel_id}, kick scheduled at {kick_datetime}")
+                                
+                                # Start a timer thread to queue the actual kick check after 30s
+                                def schedule_kick():
+                                    time.sleep(30)
+                                    self.command_queue.put({
+                                        'type': 'pkc_check_and_kick',
+                                        'clid': clid,
+                                        'channel_id': channel_id
+                                    })
+                                
+                                timer_thread = threading.Thread(target=schedule_kick, daemon=True)
+                                timer_thread.start()
+                                
+                            except Exception as warn_error:
+                                error_str = str(warn_error).lower()
+                                if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
+                                    logger.warning(f"Connection error warning client: {warn_error}")
+                                    self.worker_conn = None
+                                else:
+                                    logger.error(f"Error warning client {clid}: {warn_error}")
+                    
+                    elif isinstance(item, dict) and item.get('type') == 'pkc_check_and_kick':
+                        # Check if user is still in channel and kick them
+                        clid = item.get('clid')
+                        channel_id = item.get('channel_id')
+                        
+                        if clid and channel_id:
+                            try:
+                                # Check if still in pending kicks (not cancelled)
+                                with self.pkc_lock:
+                                    if clid not in self.pending_pkc_kicks:
+                                        logger.debug(f"PKC: Kick cancelled for client {clid} (no longer pending)")
+                                        continue
+                                    
+                                    # Check if it's for the same channel (user might have moved and come back)
+                                    if self.pending_pkc_kicks[clid]['channel_id'] != channel_id:
+                                        logger.debug(f"PKC: Kick cancelled for client {clid} (channel mismatch)")
+                                        continue
+                                
+                                # Get current clientlist to verify user is still in the channel
+                                clients = self.worker_conn.clientlist(cid=True).parsed
+                                user_in_channel = False
+                                
+                                for client in clients:
+                                    if str(client.get('clid', '')) == str(clid):
+                                        if str(client.get('cid', '')) == str(channel_id):
+                                            user_in_channel = True
+                                            break
+                                
+                                if user_in_channel:
+                                    # User is still in the channel, kick them
+                                    nickname = self.client_map.get(clid, {}).get('nickname', 'Unknown')
+                                    
+                                    # Calculate remaining time for kick reason
+                                    with self.pkc_lock:
+                                        if channel_id in self.active_pkc_channels:
+                                            end_time = self.active_pkc_channels[channel_id]['end_time']
+                                            remaining_seconds = max(0, int(end_time - time.time()))
+                                            remaining_minutes = remaining_seconds // 60
+                                            remaining_secs = remaining_seconds % 60
+                                            kick_reason = f"Channel lock for {remaining_minutes}:{remaining_secs:02d} minutes"
+                                        else:
+                                            kick_reason = "Channel is locked"
+                                    
+                                    # Kick the user
+                                    self.worker_conn.clientkick(reasonid=5, clid=clid, reasonmsg=kick_reason)
+                                    logger.info(f"PKC: Kicked client {clid} ({nickname}) from channel {channel_id}: {kick_reason}")
+                                    
+                                    # Log to pkc.csv
                                     try:
-                                        # Get nickname from client_map
-                                        nickname = self.client_map.get(clid, {}).get('nickname', 'Unknown')
-                                        
-                                        # Log to pkc.csv
                                         log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
                                         pkc_log_path = os.path.join(log_dir, 'pkc.csv')
                                         
-                                        # Check if file exists to write header
                                         file_exists = os.path.exists(pkc_log_path)
                                         
                                         with open(pkc_log_path, 'a', newline='', encoding='utf-8') as f:
@@ -1610,17 +1691,35 @@ class TS3Bot:
                                                 'nickname': nickname
                                             })
                                         
-                                        logger.debug(f"PKC: Logged event kick to pkc.csv - channel {channel_id}, clid {clid}, nickname {nickname}")
+                                        logger.debug(f"PKC: Logged event kick to pkc.csv")
                                     except Exception as log_error:
                                         logger.error(f"Error logging PKC kick to CSV: {log_error}")
+                                else:
+                                    logger.debug(f"PKC: Client {clid} no longer in channel {channel_id}, kick cancelled")
+                                
+                                # Remove from pending kicks
+                                with self.pkc_lock:
+                                    if clid in self.pending_pkc_kicks:
+                                        del self.pending_pkc_kicks[clid]
                                 
                             except Exception as kick_error:
                                 error_str = str(kick_error).lower()
                                 if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
-                                    logger.warning(f"Connection error kicking client: {kick_error}")
+                                    logger.warning(f"Connection error checking/kicking client: {kick_error}")
                                     self.worker_conn = None
                                 else:
-                                    logger.error(f"Error kicking client {clid}: {kick_error}")
+                                    logger.error(f"Error checking/kicking client {clid}: {kick_error}")
+                    
+                    elif isinstance(item, dict) and item.get('type') == 'pkc_cancel_kick':
+                        # Cancel a pending kick (user left the channel)
+                        clid = item.get('clid')
+                        
+                        if clid:
+                            with self.pkc_lock:
+                                if clid in self.pending_pkc_kicks:
+                                    channel_id = self.pending_pkc_kicks[clid]['channel_id']
+                                    del self.pending_pkc_kicks[clid]
+                                    logger.debug(f"PKC: Cancelled pending kick for client {clid} from channel {channel_id}")
                     
                     process_time = (time.perf_counter() - process_start) * 1000
                     logger.debug(f"⏱️ Total item processing: {process_time:.2f}ms")
