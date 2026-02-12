@@ -1343,11 +1343,12 @@ class TS3Bot:
                         remaining_secs = remaining_seconds % 60
                         kick_reason = f"Channel lock for {remaining_minutes}:{remaining_secs:02d} minutes"
                         
-                        # Queue kick operation to worker thread
+                        # Queue kick operation to worker thread (with channel_id for logging)
                         self.command_queue.put({
                             'type': 'kick_user',
                             'clid': clid,
-                            'reason': kick_reason
+                            'reason': kick_reason,
+                            'channel_id': target_channel  # For PKC logging
                         })
                         logger.debug(f"PKC: Queued kick for client {clid} trying to enter monitored channel {target_channel}: {kick_reason}")
                 
@@ -1575,11 +1576,44 @@ class TS3Bot:
                         # Kick a specific user from server (PKC event-based kick)
                         clid = item.get('clid')
                         reason = item.get('reason', 'Kicked by bot')
+                        channel_id = item.get('channel_id')  # For PKC logging
                         
                         if clid:
                             try:
                                 self.worker_conn.clientkick(reasonid=5, clid=clid, reasonmsg=reason)
                                 logger.info(f"PKC: Event-kicked client {clid}: {reason}")
+                                
+                                # Log to pkc.csv if channel_id is provided (event-based kick)
+                                if channel_id:
+                                    try:
+                                        # Get nickname from client_map
+                                        nickname = self.client_map.get(clid, {}).get('nickname', 'Unknown')
+                                        
+                                        # Log to pkc.csv
+                                        log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                                        pkc_log_path = os.path.join(log_dir, 'pkc.csv')
+                                        
+                                        # Check if file exists to write header
+                                        file_exists = os.path.exists(pkc_log_path)
+                                        
+                                        with open(pkc_log_path, 'a', newline='', encoding='utf-8') as f:
+                                            fieldnames = ['datetime', 'channel_id', 'clid', 'nickname']
+                                            writer = csv.DictWriter(f, fieldnames=fieldnames)
+                                            
+                                            if not file_exists:
+                                                writer.writeheader()
+                                            
+                                            writer.writerow({
+                                                'datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                                'channel_id': channel_id,
+                                                'clid': clid,
+                                                'nickname': nickname
+                                            })
+                                        
+                                        logger.debug(f"PKC: Logged event kick to pkc.csv - channel {channel_id}, clid {clid}, nickname {nickname}")
+                                    except Exception as log_error:
+                                        logger.error(f"Error logging PKC kick to CSV: {log_error}")
+                                
                             except Exception as kick_error:
                                 error_str = str(kick_error).lower()
                                 if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):

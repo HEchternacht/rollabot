@@ -676,16 +676,85 @@ def get_channel_list():
             return "[color=#FF6B6B]No channel data available.[/color]"
         
         # Format results
-        result = f"[b][color=#4ECDC4]📋 Channels List[/color][/b] [color=#A0A0A0]({len(channels)} channels)[/color]\\n"
-        result += "[color=#505050]" + "═" * 50 + "[/color]\\n\\n"
+        result = f"[b][color=#4ECDC4]📋 Channels List[/color][/b] [color=#A0A0A0]({len(channels)} channels)[/color]\n"
+        result += "[color=#505050]" + "═" * 50 + "[/color]\n\n"
         
         for cid, channel_name in sorted(channels.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0):
-            result += f"[color=#90EE90]{cid}[/color] [color=#FFD700]→[/color] [b]{channel_name}[/b]\\n"
+            result += f"[color=#90EE90]{cid}[/color] [color=#FFD700]→[/color] [b]{channel_name}[/b]\n"
         
         return result
         
     except Exception as e:
         logger.error(f"Error getting channel list: {e}")
+        return f"[color=#FF0000]Error: {str(e)}[/color]"
+
+
+def get_pkc_logs(search_term=None, max_results=50):
+    """
+    Get PKC event kick logs, optionally filtered by nickname or clid.
+    
+    Args:
+        search_term: Optional nickname or clid to filter by
+        max_results: Maximum number of results to return (default: 50)
+    
+    Returns:
+        str: Formatted PKC logs
+    """
+    try:
+        log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        pkc_log_path = os.path.join(log_dir, 'pkc.csv')
+        
+        if not os.path.exists(pkc_log_path):
+            return "[color=#FF6B6B]No PKC logs found.[/color]"
+        
+        # Read all rows
+        rows = []
+        with open(pkc_log_path, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # Filter by search term if provided
+                if search_term:
+                    search_lower = search_term.lower()
+                    nickname_lower = row.get('nickname', '').lower()
+                    clid = row.get('clid', '')
+                    
+                    if search_lower not in nickname_lower and search_lower != clid:
+                        continue
+                
+                rows.append(row)
+        
+        if not rows:
+            if search_term:
+                return f"[color=#FF6B6B]No PKC logs found for '{search_term}'.[/color]"
+            else:
+                return "[color=#FF6B6B]No PKC logs available.[/color]"
+        
+        # Reverse to show most recent first and limit results
+        rows.reverse()
+        rows = rows[:max_results]
+        
+        # Format results
+        if search_term:
+            result = f"[b][color=#DC143C]🔒 PKC Logs for '{search_term}'[/color][/b] [color=#A0A0A0]({len(rows)} entries)[/color]\n"
+        else:
+            result = f"[b][color=#DC143C]🔒 Recent PKC Logs[/color][/b] [color=#A0A0A0]({len(rows)} entries)[/color]\n"
+        
+        result += "[color=#505050]" + "═" * 60 + "[/color]\n\n"
+        
+        for row in rows:
+            datetime_str = row.get('datetime', 'N/A')
+            channel_id = row.get('channel_id', 'N/A')
+            clid = row.get('clid', 'N/A')
+            nickname = row.get('nickname', 'Unknown')
+            
+            result += f"[color=#A0A0A0]{datetime_str}[/color]\n"
+            result += f"  [color=#4ECDC4]{nickname}[/color] [color=#505050](clid: {clid})[/color]\n"
+            result += f"  [color=#FFD700]Channel:[/color] {channel_id}\n\n"
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error getting PKC logs: {e}")
         return f"[color=#FF0000]Error: {str(e)}[/color]"
 
 
@@ -718,6 +787,12 @@ def periodic_kick_channel(bot, channel_id: str, duration_minutes: int, thread_id
             # Check if still running (in case bot is shutting down)
             if not bot._running:
                 break
+            
+            # Check if cancelled via !cancelpkc (channel removed from active_pkc_channels)
+            with bot.pkc_lock:
+                if channel_id not in bot.active_pkc_channels:
+                    logger.info(f"PKC {thread_id}: Channel {channel_id} monitoring cancelled")
+                    return  # Exit thread early
             
             # Check for users in the channel and kick them (reason will be auto-formatted with time remaining)
             try:
@@ -951,7 +1026,9 @@ def process_command(bot, msg, nickname, clid=None):
                 "[b][color=#FF4500]!explog [minutes][/color][/b] - Show recent exp gains (default: 100 entries)\n"
                 "[b][color=#FF8C00]!showlogs[/color][/b] - Show last 100 warnings/errors\n"
                 "[b][color=#FFD700]!bdsm[/color][/b] - Move you and the bot to Djinns channel\n"
-                "[b][color=#DC143C]!pkc[/color][/b] [color=#A0A0A0]<channel> <minutes>[/color] - Lock channel for duration (max 3 active)\n"
+                "[b][color=#DC143C]!pkc[/color][/b] [color=#A0A0A0]<channel> <minutes> <password>[/color] - Lock channel (max 3 active)\n"
+                "[b][color=#8B0000]!cancelpkc[/color][/b] - Cancel all active channel locks\n"
+                "[b][color=#CD5C5C]!pkclogs[/color][/b] [color=#A0A0A0][nickname/clid][/color] - View PKC event kick logs\n"
                 "\n"
                 "[i]Note: [color=#A0A0A0]Obrigado Pedrin pelas apis que eu robei na cara dura.[/color][/i]\n"
                 "[color=#8B8B8B]─────────────────────────────────────[/color]"
@@ -1021,14 +1098,21 @@ def process_command(bot, msg, nickname, clid=None):
         # Periodic kick channel command
         if msg.startswith("!pkc"):
             try:
-                # Parse command: !pkc <channel_id> <duration_minutes>
-                parts = msg.split()
+                # Parse command: !pkc <channel_id> <duration_minutes> <password>
+                # Use shlex to handle quoted password
+                import shlex
+                parts = shlex.split(msg)
                 
-                if len(parts) < 3:
-                    return "\n[color=#FF6B6B]Usage:[/color] [b]!pkc[/b] [color=#A0A0A0]<channel_id> <duration_minutes>[/color]\n[color=#90EE90]Example:[/color] !pkc 5 30 (lock channel 5 for 30 minutes)"
+                if len(parts) < 4:
+                    return "\n[color=#FF6B6B]Usage:[/color] [b]!pkc[/b] [color=#A0A0A0]<channel_id> <duration_minutes> <password>[/color]\n[color=#90EE90]Example:[/color] !pkc 5 30 \"password\""
                 
                 channel_id = parts[1]
                 duration_minutes = int(parts[2])
+                password = parts[3]
+                
+                # Hardcoded password check
+                if password != "capivara69":
+                    return "\n[color=#FF6B6B]Invalid password.[/color]"
                 
                 # Validate parameters
                 if duration_minutes < 1:
@@ -1070,9 +1154,46 @@ def process_command(bot, msg, nickname, clid=None):
                 return f"\n[b][color=#4ECDC4]🔒 Channel {channel_id} locked for {duration_minutes} minutes.[/color][/b]\n[color=#A0A0A0]Active monitors: {len(bot.active_pkc_channels)}/3[/color]"
                     
             except ValueError:
-                return "\n[color=#FF6B6B]Invalid parameters. Usage:[/color] [b]!pkc[/b] [color=#A0A0A0]<channel_id> <duration_minutes>[/color]"
+                return "\n[color=#FF6B6B]Invalid parameters. Usage:[/color] [b]!pkc[/b] [color=#A0A0A0]<channel_id> <duration_minutes> <password>[/color]"
             except Exception as e:
                 logger.error(f"Error in !pkc command: {e}")
+                return f"\n[color=#FF0000]Error: {str(e)}[/color]"
+        
+        # Cancel all PKC operations
+        if msg.startswith("!cancelpkc"):
+            try:
+                with bot.pkc_lock:
+                    if not bot.active_pkc_channels:
+                        return "\n[color=#FF6B6B]No active channel locks to cancel.[/color]"
+                    
+                    cancelled_channels = list(bot.active_pkc_channels.keys())
+                    cancelled_count = len(cancelled_channels)
+                    
+                    # Clear all active channels (threads will stop when they check _running or end naturally)
+                    # The threads check if channel_id is still in active_pkc_channels, so removing them stops monitoring
+                    bot.active_pkc_channels.clear()
+                
+                channels_str = ", ".join(cancelled_channels)
+                return f"\n[b][color=#4ECDC4]🔓 Cancelled {cancelled_count} channel lock(s):[/color][/b]\n[color=#A0A0A0]Channels: {channels_str}[/color]"
+                
+            except Exception as e:
+                logger.error(f"Error in !cancelpkc command: {e}")
+                return f"\n[color=#FF0000]Error: {str(e)}[/color]"
+        
+        # Get PKC event kick logs
+        if msg.startswith("!pkclogs"):
+            try:
+                # Parse optional search term: !pkclogs <nickname/clid>
+                parts = msg.split(maxsplit=1)
+                
+                if len(parts) > 1:
+                    search_term = parts[1].strip()
+                    return "\n" + get_pkc_logs(search_term=search_term)
+                else:
+                    return "\n" + get_pkc_logs()
+                    
+            except Exception as e:
+                logger.error(f"Error in !pkclogs command: {e}")
                 return f"\n[color=#FF0000]Error: {str(e)}[/color]"
         
         # Get registered users count
