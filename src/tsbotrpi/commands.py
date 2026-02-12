@@ -802,10 +802,40 @@ def periodic_kick_channel(bot, channel_id: str, duration_minutes: int, thread_id
         
         logger.info(f"PKC {thread_id}: Starting channel {channel_id} monitoring for {duration_minutes} minutes")
         
-        # Initial kick of everyone in the channel (reason will be auto-formatted with time remaining)
-        result = bot.kick_channel_users(channel_id)
-        if result['success']:
-            logger.info(f"PKC {thread_id}: Initial kick - {result['kicked_count']} users removed from channel {channel_id}")
+        # Warn all users currently in the channel (they have 30s to leave)
+        try:
+            # Get all clients in the channel
+            clients = bot.worker_conn.clientlist().parsed
+            users_in_channel = []
+            
+            for client in clients:
+                # Check if client is in the target channel
+                if str(client.get('cid', '')) != str(channel_id):
+                    continue
+                
+                # Skip bot itself (ServerQuery client)
+                client_type = client.get('client_type', '')
+                if client_type == '1':
+                    continue
+                
+                clid = client.get('clid', '')
+                if clid:
+                    users_in_channel.append(clid)
+            
+            # Queue warnings for all users in the channel
+            if users_in_channel:
+                logger.info(f"PKC {thread_id}: Warning {len(users_in_channel)} users currently in channel {channel_id}")
+                for clid in users_in_channel:
+                    bot.command_queue.put({
+                        'type': 'pkc_warn_user',
+                        'clid': clid,
+                        'channel_id': channel_id
+                    })
+            else:
+                logger.info(f"PKC {thread_id}: No users in channel {channel_id} at start")
+                
+        except Exception as e:
+            logger.error(f"PKC {thread_id}: Error warning initial users: {e}")
         
         # Monitor loop
         while time.time() < end_time:
