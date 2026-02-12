@@ -266,7 +266,6 @@ class TS3Bot:
         
         # Periodic kick channel tracking
         self.active_pkc_channels = {}  # Dict of channel_id -> {'thread': Thread, 'end_time': timestamp, 'thread_id': str}
-        self.pkc_lock = threading.Lock()  # Lock for thread-safe access to active channels dict
         self.pending_pkc_kicks = {}  # Dict of clid -> {'channel_id': str, 'scheduled_time': float}
 
     @timed
@@ -597,14 +596,15 @@ class TS3Bot:
                 return {'success': False, 'kicked_count': 0, 'error': 'Worker connection not available'}
             
             # Calculate time remaining if this is a PKC monitored channel
+            # Note: Reading from active_pkc_channels without lock (dict reads are atomic in CPython)
+            # Only worker thread modifies this dict, so race conditions are minimal
             kick_reason = reason
-            with self.pkc_lock:
-                if channel_id in self.active_pkc_channels:
-                    end_time = self.active_pkc_channels[channel_id]['end_time']
-                    remaining_seconds = max(0, int(end_time - time.time()))
-                    remaining_minutes = remaining_seconds // 60
-                    remaining_secs = remaining_seconds % 60
-                    kick_reason = f"Channel lock for {remaining_minutes}:{remaining_secs:02d} minutes"
+            if channel_id in self.active_pkc_channels:
+                end_time = self.active_pkc_channels[channel_id]['end_time']
+                remaining_seconds = max(0, int(end_time - time.time()))
+                remaining_minutes = remaining_seconds // 60
+                remaining_secs = remaining_seconds % 60
+                kick_reason = f"Channel lock for {remaining_minutes}:{remaining_secs:02d} minutes"
             
             # Get all clients
             clients = self.worker_conn.clientlist().parsed
@@ -1362,26 +1362,19 @@ class TS3Bot:
                 source_channel = str(event_data.get('cfid', ''))
                 target_channel = str(event_data.get('ctid', ''))
                 
-                # Check if moved FROM a monitored PKC channel (cancel pending kick)
-                with self.pkc_lock:
-                    if source_channel in self.active_pkc_channels:
-                        # User left a monitored channel, cancel pending kick
-                        self.command_queue.put({
-                            'type': 'pkc_cancel_kick',
-                            'clid': clid
-                        })
-                        logger.debug(f"PKC: Queued cancel kick for client {clid} leaving monitored channel {source_channel}")
+                # Queue check if moved FROM a monitored PKC channel (cancel pending kick)
+                self.command_queue.put({
+                    'type': 'pkc_check_cancel_kick',
+                    'clid': clid,
+                    'source_channel': source_channel
+                })
                 
-                # Check if moved TO a monitored PKC channel (warn user)
-                with self.pkc_lock:
-                    if target_channel in self.active_pkc_channels:
-                        # User entered a monitored channel, warn them
-                        self.command_queue.put({
-                            'type': 'pkc_warn_user',
-                            'clid': clid,
-                            'channel_id': target_channel
-                        })
-                        logger.debug(f"PKC: Queued warning for client {clid} entering monitored channel {target_channel}")
+                # Queue check if moved TO a monitored PKC channel (warn user)
+                self.command_queue.put({
+                    'type': 'pkc_check_warn_user',
+                    'clid': clid,
+                    'target_channel': target_channel
+                })
                 
             elif event_type == 'notifyclientupdated':
                 # Client updated - only log if nickname or mute status changed
@@ -1614,12 +1607,11 @@ class TS3Bot:
                                 kick_time = time.time() + 30
                                 kick_datetime = datetime.fromtimestamp(kick_time).strftime('%H:%M')
                                 
-                                # Store in pending kicks
-                                with self.pkc_lock:
-                                    self.pending_pkc_kicks[clid] = {
-                                        'channel_id': channel_id,
-                                        'scheduled_time': kick_time
-                                    }
+                                # Store in pending kicks (no lock needed - only worker thread modifies this)
+                                self.pending_pkc_kicks[clid] = {
+                                    'channel_id': channel_id,
+                                    'scheduled_time': kick_time
+                                }
                                 
                                 # Get nickname from client_map
                                 nickname = self.client_map.get(clid, {}).get('nickname', 'Unknown')
@@ -1658,15 +1650,14 @@ class TS3Bot:
                             try:
                                 should_kick = False
                                 
-                                # Check if still in pending kicks (not cancelled)
-                                with self.pkc_lock:
-                                    if clid not in self.pending_pkc_kicks:
-                                        logger.debug(f"PKC: Kick cancelled for client {clid} (no longer pending)")
-                                    elif self.pending_pkc_kicks[clid]['channel_id'] != channel_id:
-                                        # Check if it's for the same channel (user might have moved and come back)
-                                        logger.debug(f"PKC: Kick cancelled for client {clid} (channel mismatch)")
-                                    else:
-                                        should_kick = True
+                                # Check if still in pending kicks (not cancelled) (no lock needed - only worker thread modifies this)
+                                if clid not in self.pending_pkc_kicks:
+                                    logger.debug(f"PKC: Kick cancelled for client {clid} (no longer pending)")
+                                elif self.pending_pkc_kicks[clid]['channel_id'] != channel_id:
+                                    # Check if it's for the same channel (user might have moved and come back)
+                                    logger.debug(f"PKC: Kick cancelled for client {clid} (channel mismatch)")
+                                else:
+                                    should_kick = True
                                 
                                 if should_kick:
                                     # Get current clientlist to verify user is still in the channel
@@ -1683,16 +1674,15 @@ class TS3Bot:
                                         # User is still in the channel, kick them
                                         nickname = self.client_map.get(clid, {}).get('nickname', 'Unknown')
                                         
-                                        # Calculate remaining time for kick reason
-                                        with self.pkc_lock:
-                                            if channel_id in self.active_pkc_channels:
-                                                end_time = self.active_pkc_channels[channel_id]['end_time']
-                                                remaining_seconds = max(0, int(end_time - time.time()))
-                                                remaining_minutes = remaining_seconds // 60
-                                                remaining_secs = remaining_seconds % 60
-                                                kick_reason = f"Channel lock for {remaining_minutes}:{remaining_secs:02d} minutes"
-                                            else:
-                                                kick_reason = "Channel is locked"
+                                        # Calculate remaining time for kick reason (no lock needed - only reading)
+                                        if channel_id in self.active_pkc_channels:
+                                            end_time = self.active_pkc_channels[channel_id]['end_time']
+                                            remaining_seconds = max(0, int(end_time - time.time()))
+                                            remaining_minutes = remaining_seconds // 60
+                                            remaining_secs = remaining_seconds % 60
+                                            kick_reason = f"Channel lock for {remaining_minutes}:{remaining_secs:02d} minutes"
+                                        else:
+                                            kick_reason = "Channel is locked"
                                         
                                         # Kick the user
                                         self.worker_conn.clientkick(reasonid=5, clid=clid, reasonmsg=kick_reason)
@@ -1725,10 +1715,9 @@ class TS3Bot:
                                     else:
                                         logger.debug(f"PKC: Client {clid} no longer in channel {channel_id}, kick cancelled")
                                     
-                                    # Remove from pending kicks
-                                    with self.pkc_lock:
-                                        if clid in self.pending_pkc_kicks:
-                                            del self.pending_pkc_kicks[clid]
+                                    # Remove from pending kicks (no lock needed - only worker thread modifies this)
+                                    if clid in self.pending_pkc_kicks:
+                                        del self.pending_pkc_kicks[clid]
                                 
                             except Exception as kick_error:
                                 error_str = str(kick_error).lower()
@@ -1738,16 +1727,97 @@ class TS3Bot:
                                 else:
                                     logger.error(f"Error checking/kicking client {clid}: {kick_error}")
                     
-                    elif isinstance(item, dict) and item.get('type') == 'pkc_cancel_kick':
-                        # Cancel a pending kick (user left the channel)
+                    elif isinstance(item, dict) and item.get('type') == 'pkc_check_cancel_kick':
+                        # Check if source channel is monitored and cancel pending kick
                         clid = item.get('clid')
+                        source_channel = item.get('source_channel')
                         
-                        if clid:
-                            with self.pkc_lock:
+                        if clid and source_channel:
+                            # Check if source channel is monitored (no lock needed - only worker thread accesses this)
+                            if source_channel in self.active_pkc_channels:
+                                # User left a monitored channel, cancel pending kick
                                 if clid in self.pending_pkc_kicks:
                                     channel_id = self.pending_pkc_kicks[clid]['channel_id']
                                     del self.pending_pkc_kicks[clid]
-                                    logger.debug(f"PKC: Cancelled pending kick for client {clid} from channel {channel_id}")
+                                    logger.debug(f"PKC: Cancelled pending kick for client {clid} leaving monitored channel {channel_id}")
+                    
+                    elif isinstance(item, dict) and item.get('type') == 'pkc_check_warn_user':
+                        # Check if target channel is monitored and warn user
+                        clid = item.get('clid')
+                        target_channel = item.get('target_channel')
+                        
+                        if clid and target_channel:
+                            # Check if target channel is monitored (no lock needed - only worker thread accesses this)
+                            if target_channel in self.active_pkc_channels:
+                                # User entered a monitored channel, warn them
+                                self.command_queue.put({
+                                    'type': 'pkc_warn_user',
+                                    'clid': clid,
+                                    'channel_id': target_channel
+                                })
+                                logger.debug(f"PKC: Queued warning for client {clid} entering monitored channel {target_channel}")
+                    
+                    elif isinstance(item, dict) and item.get('type') == 'pkc_warn_initial_users':
+                        # Get all users in a channel and warn them
+                        channel_id = item.get('channel_id')
+                        
+                        if channel_id:
+                            try:
+                                # Get all clients in the channel
+                                clients = self.worker_conn.clientlist().parsed
+                                users_in_channel = []
+                                
+                                for client in clients:
+                                    # Check if client is in the target channel
+                                    if str(client.get('cid', '')) != str(channel_id):
+                                        continue
+                                    
+                                    # Skip bot itself (ServerQuery client)
+                                    client_type = client.get('client_type', '')
+                                    if client_type == '1':
+                                        continue
+                                    
+                                    clid = client.get('clid', '')
+                                    if clid:
+                                        users_in_channel.append(clid)
+                                
+                                # Queue warnings for all users in the channel
+                                if users_in_channel:
+                                    logger.info(f"PKC: Warning {len(users_in_channel)} users currently in channel {channel_id}")
+                                    for clid in users_in_channel:
+                                        self.command_queue.put({
+                                            'type': 'pkc_warn_user',
+                                            'clid': clid,
+                                            'channel_id': channel_id
+                                        })
+                                else:
+                                    logger.info(f"PKC: No users in channel {channel_id} at start")
+                                    
+                            except Exception as e:
+                                logger.error(f"PKC: Error warning initial users in channel {channel_id}: {e}")
+                    
+                    elif isinstance(item, dict) and item.get('type') == 'pkc_cleanup_channel':
+                        # Remove channel from active monitoring
+                        channel_id = item.get('channel_id')
+                        thread_id = item.get('thread_id')
+                        
+                        if channel_id:
+                            # Remove channel (no lock needed - only worker thread accesses this)
+                            if channel_id in self.active_pkc_channels:
+                                del self.active_pkc_channels[channel_id]
+                                logger.debug(f"PKC {thread_id}: Channel {channel_id} removed from active monitoring")
+                    
+                    elif isinstance(item, dict) and item.get('type') == 'pkc_cancel_all':
+                        # Cancel all active PKC channels
+                        if self.active_pkc_channels:
+                            cancelled_channels = list(self.active_pkc_channels.keys())
+                            cancelled_count = len(cancelled_channels)
+                            
+                            # Clear all active channels (threads will stop when they check active_pkc_channels)
+                            self.active_pkc_channels.clear()
+                            
+                            channels_str = ", ".join(cancelled_channels)
+                            logger.info(f"PKC: Cancelled {cancelled_count} channel lock(s): {channels_str}")
                     
                     process_time = (time.perf_counter() - process_start) * 1000
                     logger.debug(f"⏱️ Total item processing: {process_time:.2f}ms")

@@ -803,39 +803,12 @@ def periodic_kick_channel(bot, channel_id: str, duration_minutes: int, thread_id
         logger.info(f"PKC {thread_id}: Starting channel {channel_id} monitoring for {duration_minutes} minutes")
         
         # Warn all users currently in the channel (they have 30s to leave)
-        try:
-            # Get all clients in the channel
-            clients = bot.worker_conn.clientlist().parsed
-            users_in_channel = []
-            
-            for client in clients:
-                # Check if client is in the target channel
-                if str(client.get('cid', '')) != str(channel_id):
-                    continue
-                
-                # Skip bot itself (ServerQuery client)
-                client_type = client.get('client_type', '')
-                if client_type == '1':
-                    continue
-                
-                clid = client.get('clid', '')
-                if clid:
-                    users_in_channel.append(clid)
-            
-            # Queue warnings for all users in the channel
-            if users_in_channel:
-                logger.info(f"PKC {thread_id}: Warning {len(users_in_channel)} users currently in channel {channel_id}")
-                for clid in users_in_channel:
-                    bot.command_queue.put({
-                        'type': 'pkc_warn_user',
-                        'clid': clid,
-                        'channel_id': channel_id
-                    })
-            else:
-                logger.info(f"PKC {thread_id}: No users in channel {channel_id} at start")
-                
-        except Exception as e:
-            logger.error(f"PKC {thread_id}: Error warning initial users: {e}")
+        # Queue a request to get users in channel and warn them
+        bot.command_queue.put({
+            'type': 'pkc_warn_initial_users',
+            'channel_id': channel_id
+        })
+        logger.info(f"PKC {thread_id}: Queued initial user warnings for channel {channel_id}")
         
         # Monitor loop
         while time.time() < end_time:
@@ -845,19 +818,14 @@ def periodic_kick_channel(bot, channel_id: str, duration_minutes: int, thread_id
             if not bot._running:
                 break
             
-            # Check if cancelled via !cancelpkc (channel removed from active_pkc_channels)
-            with bot.pkc_lock:
-                if channel_id not in bot.active_pkc_channels:
-                    logger.info(f"PKC {thread_id}: Channel {channel_id} monitoring cancelled")
-                    return  # Exit thread early
+            # Check if cancelled via !cancelpkc by checking if channel still exists
+            if channel_id not in bot.active_pkc_channels:
+                logger.info(f"PKC {thread_id}: Channel {channel_id} monitoring cancelled")
+                return  # Exit thread early
             
-            # Check for users in the channel and kick them (reason will be auto-formatted with time remaining)
-            try:
-                result = bot.kick_channel_users(channel_id)
-                if result['success'] and result['kicked_count'] > 0:
-                    logger.info(f"PKC {thread_id}: Kicked {result['kicked_count']} users from channel {channel_id}")
-            except Exception as e:
-                logger.warning(f"PKC {thread_id}: Error during check kick: {e}")
+            # Note: PKC now works entirely through event-driven warnings
+            # Users entering the channel trigger warnings via event handler
+            # No periodic polling needed - all operations go through worker queue
         
         remaining_time = max(0, int((end_time - time.time()) / 60))
         if remaining_time == 0:
@@ -869,11 +837,12 @@ def periodic_kick_channel(bot, channel_id: str, duration_minutes: int, thread_id
         logger.error(f"PKC {thread_id}: Error in channel monitoring thread: {e}", exc_info=True)
     
     finally:
-        # Remove channel from active monitoring
-        with bot.pkc_lock:
-            if channel_id in bot.active_pkc_channels:
-                del bot.active_pkc_channels[channel_id]
-            logger.debug(f"PKC {thread_id}: Channel {channel_id} removed from active monitoring")
+        # Queue removal from active monitoring
+        bot.command_queue.put({
+            'type': 'pkc_cleanup_channel',
+            'channel_id': channel_id,
+            'thread_id': thread_id
+        })
 
 
 def search_activity_log(search_term: str, max_results: int = 50):
@@ -1178,32 +1147,31 @@ def process_command(bot, msg, nickname, clid=None):
                 if duration_minutes > 180:
                     return "\n[color=#FF6B6B]Maximum duration is 180 minutes (3 hours).[/color]"
                 
-                # Check if max concurrent channels reached
-                with bot.pkc_lock:
-                    if len(bot.active_pkc_channels) >= 3:
-                        return "\n[color=#FF6B6B]Max monitored channels active (3/3). Please wait for one to complete.[/color]"
-                    
-                    # Check if channel already being monitored
-                    if channel_id in bot.active_pkc_channels:
-                        return f"\n[color=#FF6B6B]Channel {channel_id} is already being monitored.[/color]"
-                    
-                    # Create thread info
-                    thread_id = f"pkc_{channel_id}_{int(time.time())}"
-                    thread = threading.Thread(
-                        target=periodic_kick_channel,
-                        args=(bot, channel_id, duration_minutes, thread_id),
-                        daemon=True
-                    )
-                    
-                    # Add to active channels
-                    end_time = time.time() + (duration_minutes * 60)
-                    bot.active_pkc_channels[channel_id] = {
-                        'thread_id': thread_id,
-                        'thread': thread,
-                        'end_time': end_time,
-                        'duration_minutes': duration_minutes,
-                        'started': datetime.now()
-                    }
+                # Check if max concurrent channels reached (safe to read, only worker modifies)
+                if len(bot.active_pkc_channels) >= 3:
+                    return "\n[color=#FF6B6B]Max monitored channels active (3/3). Please wait for one to complete.[/color]"
+                
+                # Check if channel already being monitored (safe to read, only worker modifies)
+                if channel_id in bot.active_pkc_channels:
+                    return f"\n[color=#FF6B6B]Channel {channel_id} is already being monitored.[/color]"
+                
+                # Create thread info
+                thread_id = f"pkc_{channel_id}_{int(time.time())}"
+                thread = threading.Thread(
+                    target=periodic_kick_channel,
+                    args=(bot, channel_id, duration_minutes, thread_id),
+                    daemon=True
+                )
+                
+                # Add to active channels (directly, will be accessed by worker thread only)
+                end_time = time.time() + (duration_minutes * 60)
+                bot.active_pkc_channels[channel_id] = {
+                    'thread_id': thread_id,
+                    'thread': thread,
+                    'end_time': end_time,
+                    'duration_minutes': duration_minutes,
+                    'started': datetime.now()
+                }
                     
                     # Start thread
                     thread.start()
@@ -1219,19 +1187,20 @@ def process_command(bot, msg, nickname, clid=None):
         # Cancel all PKC operations
         if msg.startswith("!cancelpkc"):
             try:
-                with bot.pkc_lock:
-                    if not bot.active_pkc_channels:
-                        return "\n[color=#FF6B6B]No active channel locks to cancel.[/color]"
-                    
-                    cancelled_channels = list(bot.active_pkc_channels.keys())
-                    cancelled_count = len(cancelled_channels)
-                    
-                    # Clear all active channels (threads will stop when they check _running or end naturally)
-                    # The threads check if channel_id is still in active_pkc_channels, so removing them stops monitoring
-                    bot.active_pkc_channels.clear()
+                # Queue a request to cancel all PKC channels
+                # The worker thread will handle this to avoid race conditions
+                bot.command_queue.put({
+                    'type': 'pkc_cancel_all'
+                })
                 
-                channels_str = ", ".join(cancelled_channels)
-                return f"\n[b][color=#4ECDC4]🔓 Cancelled {cancelled_count} channel lock(s):[/color][/b]\n[color=#A0A0A0]Channels: {channels_str}[/color]"
+                # Give the worker thread a moment to process
+                time.sleep(0.1)
+                
+                # Check if there were any channels (this is safe to read after worker processes)
+                if not bot.active_pkc_channels:
+                    return "\n[color=#FF6B6B]No active channel locks to cancel.[/color]"
+                
+                return "\n[b][color=#4ECDC4]🔓 Cancelled all active channel locks.[/color][/b]"
                 
             except Exception as e:
                 logger.error(f"Error in !cancelpkc command: {e}")
