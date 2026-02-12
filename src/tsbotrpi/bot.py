@@ -874,30 +874,10 @@ class TS3Bot:
                 logger.debug("No guild members with exp gains")
                 return
             
-            # Format notification message
-            refresh_time = datetime.fromtimestamp(current_refresh_ts).strftime('%d/%m/%Y %H:%M:%S')
-            message = f"[b][color=#FFD700]═══ Guild Exp Update ═══[/color][/b]\n"
-            message += f"[color=#A0A0A0]{refresh_time}[/color]\n"
-            #message += "[color=#505050]" + "═" * 50 + "[/color]\n\n"
-            
             # Log individual exp deltas to exp_deltas.csv
             self._log_exp_deltas(members_with_gains)
             
-            for member in members_with_gains:
-                name = member.get('name', 'Unknown')
-                delta_exp = member.get('delta_experience', 0)
-                level = member.get('level', 0)
-                vocation = member.get('vocation', 'Unknown')
-                
-                # Format exp with thousands separator
-                delta_exp_formatted = f"{delta_exp:,}"
-                
-                message += f"[b][color=#4ECDC4]{name}[/color][/b] [color=#A0A0A0](Lvl {level} {vocation})[/color]\n"
-                message += f"  [color=#00FF00]⬆ +{delta_exp_formatted} exp[/color]\n\n"
-            
-            logger.info(f"Guild exp gains detected for {len(members_with_gains)} members")
-            
-            # Load registered users
+            # Load registered users with their thresholds
             log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             registered_file = os.path.join(log_dir, 'registered.txt')
             
@@ -906,22 +886,68 @@ class TS3Bot:
                 return
             
             read_start = time.perf_counter()
+            registered_users = {}  # uid -> min_exp threshold
             with open(registered_file, 'r', encoding='utf-8') as f:
-                registered_uids = set(line.strip() for line in f if line.strip())
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    # Parse format: "uid" or "uid,min_exp"
+                    if ',' in line:
+                        parts = line.split(',', 1)
+                        registered_users[parts[0]] = int(parts[1])
+                    else:
+                        # Backward compatibility: no threshold means 0
+                        registered_users[line] = 0
+            
             read_time = (time.perf_counter() - read_start) * 1000
             logger.debug(f"⏱️ Read registered.txt: {read_time:.2f}ms")
             
-            if not registered_uids:
+            if not registered_users:
                 logger.debug("No registered users for guild exp notifications")
                 return
             
-            # Add this poke to the queue for reliable delivery
-            self.pending_pokes.append({
-                'message': message,
-                'target_uids': registered_uids.copy(),
-                'timestamp': time.time()
-            })
-            logger.info(f"Queued guild exp notification for {len(registered_uids)} registered users")
+            # Group users by threshold to minimize duplicate messages
+            threshold_groups = {}  # min_exp -> set of uids
+            for uid, min_exp in registered_users.items():
+                if min_exp not in threshold_groups:
+                    threshold_groups[min_exp] = set()
+                threshold_groups[min_exp].add(uid)
+            
+            # For each threshold group, create appropriate message and queue pokes
+            for min_exp, uids_in_group in threshold_groups.items():
+                # Filter members that meet this threshold
+                filtered_members = [m for m in members_with_gains if m.get('delta_experience', 0) > min_exp]
+                
+                if not filtered_members:
+                    logger.debug(f"No members meet threshold {min_exp} for {len(uids_in_group)} users")
+                    continue
+                
+                # Format notification message for this threshold
+                refresh_time = datetime.fromtimestamp(current_refresh_ts).strftime('%d/%m/%Y %H:%M:%S')
+                message = f"[b][color=#FFD700]═══ Guild Exp Update ═══[/color][/b]\n"
+                message += f"[color=#A0A0A0]{refresh_time}[/color]\n"
+                
+                for member in filtered_members:
+                    name = member.get('name', 'Unknown')
+                    delta_exp = member.get('delta_experience', 0)
+                    level = member.get('level', 0)
+                    vocation = member.get('vocation', 'Unknown')
+                    
+                    # Format exp with thousands separator
+                    delta_exp_formatted = f"{delta_exp:,}"
+                    
+                    message += f"[b][color=#4ECDC4]{name}[/color][/b] [color=#A0A0A0](Lvl {level} {vocation})[/color]\n"
+                    message += f"  [color=#00FF00]⬆ +{delta_exp_formatted} exp[/color]\n\n"
+                
+                # Queue poke for this threshold group
+                self.pending_pokes.append({
+                    'message': message,
+                    'target_uids': uids_in_group.copy(),
+                    'timestamp': time.time()
+                })
+                logger.info(f"Queued guild exp notification for {len(uids_in_group)} users (threshold: {min_exp}, {len(filtered_members)} members)")
             
             # Try to send immediately
             self._send_pending_pokes()

@@ -155,12 +155,13 @@ def get_exp_log(minutes: int = None, entries: int = 100) -> str:
         return "[color=#FF0000]Error reading exp deltas log.[/color]"
 
 
-def register_exp_user(uid: str) -> str:
+def register_exp_user(uid: str, min_exp: int = 0) -> str:
     """
-    Register a user for guild exp notifications.
+    Register a user for guild exp notifications with optional minimum exp threshold.
     
     Args:
         uid: User UID to register
+        min_exp: Minimum exp delta to receive notifications (default: 0, all notifications)
     
     Returns:
         str: Success or error message
@@ -168,28 +169,42 @@ def register_exp_user(uid: str) -> str:
     try:
         log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         registered_file = os.path.join(log_dir, 'registered.txt')
-        logger.debug(f"Registering UID: {uid} in file: {registered_file}")
-        # Load existing UIDs
-        registered_uids = set()
+        logger.debug(f"Registering UID: {uid} with min_exp: {min_exp} in file: {registered_file}")
+        
+        # Load existing registrations
+        registered_users = {}  # uid -> min_exp
         if os.path.exists(registered_file):
             with open(registered_file, 'r', encoding='utf-8') as f:
-                logger.debug(f"Reading existing registered UIDs from {registered_file}")
-                registered_uids = set(line.strip() for line in f if line.strip())
+                logger.debug(f"Reading existing registered users from {registered_file}")
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    # Parse format: "uid" or "uid,min_exp"
+                    if ',' in line:
+                        parts = line.split(',', 1)
+                        registered_users[parts[0]] = int(parts[1])
+                    else:
+                        # Backward compatibility: no threshold means 0
+                        registered_users[line] = 0
         
-        # Check if already registered
-        if uid in registered_uids:
-            return "[color=#FFD700]You are already registered for guild exp notifications.[/color]"
-        
-        # Add new UID
-        registered_uids.add(uid)
+        # Add or update user registration
+        registered_users[uid] = min_exp
         
         # Write back to file
         with open(registered_file, 'w', encoding='utf-8') as f:
-            for registered_uid in sorted(registered_uids):
-                f.write(f"{registered_uid}\n")
+            for reg_uid in sorted(registered_users.keys()):
+                threshold = registered_users[reg_uid]
+                f.write(f"{reg_uid},{threshold}\n")
         
-        logger.info(f"Registered {uid} for guild exp notifications")
-        return "[b][color=#00FF00]✅ Successfully registered for guild exp notifications![/color][/b]"
+        if min_exp > 0:
+            min_exp_formatted = f"{min_exp:,}"
+            logger.info(f"Registered {uid} for guild exp notifications (min: {min_exp})")
+            return f"[b][color=#00FF00]✅ Successfully registered for guild exp notifications![/color][/b]\n[color=#FFD700]Minimum exp threshold: {min_exp_formatted}[/color]"
+        else:
+            logger.info(f"Registered {uid} for guild exp notifications (all notifications)")
+            return "[b][color=#00FF00]✅ Successfully registered for guild exp notifications![/color][/b]\n[color=#FFD700]You will receive all exp notifications.[/color]"
         
     except Exception as e:
         logger.error(f"Error registering user for exp notifications: {e}")
@@ -213,22 +228,34 @@ def unregister_exp_user(uid: str) -> str:
         if not os.path.exists(registered_file):
             return "[color=#FFD700]You are not registered for guild exp notifications.[/color]"
         
-        # Load existing UIDs
-        registered_uids = set()
+        # Load existing registrations
+        registered_users = {}  # uid -> min_exp
         with open(registered_file, 'r', encoding='utf-8') as f:
-            registered_uids = set(line.strip() for line in f if line.strip())
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Parse format: "uid" or "uid,min_exp"
+                if ',' in line:
+                    parts = line.split(',', 1)
+                    registered_users[parts[0]] = int(parts[1])
+                else:
+                    # Backward compatibility: no threshold means 0
+                    registered_users[line] = 0
         
         # Check if registered
-        if uid not in registered_uids:
+        if uid not in registered_users:
             return "[color=#FFD700]You are not registered for guild exp notifications.[/color]"
         
-        # Remove UID
-        registered_uids.remove(uid)
+        # Remove user
+        del registered_users[uid]
         
         # Write back to file
         with open(registered_file, 'w', encoding='utf-8') as f:
-            for registered_uid in sorted(registered_uids):
-                f.write(f"{registered_uid}\n")
+            for reg_uid in sorted(registered_users.keys()):
+                threshold = registered_users[reg_uid]
+                f.write(f"{reg_uid},{threshold}\n")
         
         logger.info(f"Unregistered {uid} from guild exp notifications")
         return "[b][color=#00FF00]✅ Successfully unregistered from guild exp notifications.[/color][/b]"
@@ -1019,7 +1046,7 @@ def process_command(bot, msg, nickname, clid=None):
                 "[b][color=#20B2AA]!channelids[/color][/b] - List all channels with their IDs\n"
                 "[b][color=#00CED1]!registered[/color][/b] - Show number of users registered for exp\n"
                 "[b][color=#1E90FF]!uptime[/color][/b] - Show bot uptime\n"
-                "[b][color=#4169E1]!registerexp[/color][/b] - Register for guild exp notifications\n"
+                "[b][color=#4169E1]!registerexp[/color][/b] [color=#A0A0A0][min_exp][/color] - Register for guild exp notifications\n"
                 "[b][color=#8A2BE2]!unregisterexp[/color][/b] - Unregister from guild exp notifications\n"
                 "[b][color=#9932CC]!warexp[/color][/b] - Show war statistics (Shell vs Ascended)\n"
                 "[b][color=#FF1493]!warexplog [days][/color][/b] - Show war exp history (default: 30 days)\n"
@@ -1232,7 +1259,19 @@ def process_command(bot, msg, nickname, clid=None):
         if msg.startswith("!registerexp"):
             # Get user UID from reference data (avoid API calls from event loop)
             try:
-                logger.debug(f"Processing registerexp for nickname: {nickname}")
+                # Parse optional min_exp parameter: !registerexp <min_exp>
+                parts = msg.split()
+                min_exp = 0
+                
+                if len(parts) > 1:
+                    try:
+                        min_exp = int(parts[1])
+                        if min_exp < 0:
+                            return "\n[color=#FF6B6B]Minimum exp must be 0 or greater.[/color]"
+                    except ValueError:
+                        return "\n[color=#FF6B6B]Invalid number. Usage:[/color] [b]!registerexp[/b] [color=#A0A0A0][min_exp][/color]\n[color=#90EE90]Example:[/color] !registerexp 100000"
+                
+                logger.debug(f"Processing registerexp for nickname: {nickname} with min_exp: {min_exp}")
                 user_uid = None
                 
                 # Use reference manager's client_map if available
@@ -1267,8 +1306,8 @@ def process_command(bot, msg, nickname, clid=None):
                         logger.debug(f"Could not read reference data: {ref_error}")
                 
                 if user_uid:
-                    logger.debug(f"Registering user UID: {user_uid} for exp notifications")
-                    return "\n" + register_exp_user(user_uid)
+                    logger.debug(f"Registering user UID: {user_uid} for exp notifications with min_exp: {min_exp}")
+                    return "\n" + register_exp_user(user_uid, min_exp)
                 else:
                     return "\n[color=#FF6B6B]Could not find your UID. Please wait a minute for data to refresh and try again.[/color]"
             except Exception as e:
