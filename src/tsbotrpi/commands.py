@@ -1030,7 +1030,7 @@ def process_command(bot, msg, nickname, clid=None):
                 "[b][color=#8B0000]!cancelpkc[/color][/b] - Cancel all active channel locks\n"
                 "[b][color=#CD5C5C]!pkclogs[/color][/b] [color=#A0A0A0][nickname/clid][/color] - View PKC event kick logs\n"
                 "\n"
-                "[i]Note: [color=#A0A0A0]Obrigado Pedrin pelas apis que eu robei na cara dura.[/color][/i]\n"
+                "[i]Note: [color=#A0A0A0]Obrigado Pedrin pelas apis que eu robei na cara dura. PATROCINIO:[url]https://bit.ly/3Mt6fxE[/url][/color][/i]\n"
                 "[color=#8B8B8B]─────────────────────────────────────[/color]"
 
                 # "!registerfriendlyexp - Register for friendly guild exp notifications\n"  # Commented out
