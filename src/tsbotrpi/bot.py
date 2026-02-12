@@ -520,7 +520,7 @@ class TS3Bot:
         return f"Added {target} to hunted list"
 
     def _split_poke_message(self, msg, max_length=1000):
-        """Split a poke message into chunks of max_length, preferring to split at newlines.
+        """Split a poke message into chunks of max_length, preferring to split at double newlines, then single newlines.
         
         Args:
             msg: Message string to split
@@ -543,17 +543,25 @@ class TS3Bot:
             # Take up to max_length characters
             chunk = remaining[:max_length]
             
-            # Try to find the last newline within the chunk
-            last_newline = chunk.rfind('\n')
+            # Try to find the last double newline within the chunk
+            last_double_newline = chunk.rfind('\n\n')
             
-            if last_newline > 0:  # Found a newline (not at position 0)
-                # Split at the newline (include the newline in the chunk)
-                chunks.append(remaining[:last_newline + 1])
-                remaining = remaining[last_newline + 1:]
+            if last_double_newline > 0:  # Found a double newline (not at position 0)
+                # Split at the double newline (include both newlines in the chunk)
+                chunks.append(remaining[:last_double_newline + 2])
+                remaining = remaining[last_double_newline + 2:]
             else:
-                # No newline found, split at max_length
-                chunks.append(chunk)
-                remaining = remaining[max_length:]
+                # Try to find the last single newline within the chunk
+                last_newline = chunk.rfind('\n')
+                
+                if last_newline > 0:  # Found a newline (not at position 0)
+                    # Split at the newline (include the newline in the chunk)
+                    chunks.append(remaining[:last_newline + 1])
+                    remaining = remaining[last_newline + 1:]
+                else:
+                    # No newline found, split at max_length
+                    chunks.append(chunk)
+                    remaining = remaining[max_length:]
         
         return chunks
     

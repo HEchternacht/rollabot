@@ -1164,6 +1164,25 @@ def process_command(bot, msg, nickname, clid=None):
                 return "\n[color=#FF0000]Error executing bdsm command.[/color]"
         
         # Show logs command
+        if msg.startswith("!resp "):
+            import random
+            resp_choices=[
+                "Rotworm de Thais",
+                "Larvas de Port Hope",
+                "Dragons de Rookgard",
+                "Undead Micropenis",
+                "Xereca's Darklight",
+                "Dp de thais andar de baixo",
+                "Casa do caralho",
+                "Cyclopolis de roshamuul"
+
+            ]
+
+
+            return f"\n[b][color=#228B22]O respawn ([b]{random.choice(resp_choices)}[/b]) é seu agora. O limite de tempo neste respawn é de [b]03:00[/b]"
+
+
+
         if msg.startswith("!showlogs"):
             try:
                 if not hasattr(bot, 'log_handler'):
