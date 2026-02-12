@@ -1664,65 +1664,69 @@ class TS3Bot:
                                             'channel_id': channel_id
                                         })
                                     else:
-                                        # Time has passed, check if user still in channel and kick
-                                        # Get current clientlist to verify user is still in the channel
-                                        clients = self.worker_conn.clientlist().parsed
-                                        user_in_channel = False
-                                        
-                                        for client in clients:
-                                            if str(client.get('clid', '')) == str(clid):
-                                                if str(client.get('cid', '')) == str(channel_id):
-                                                    user_in_channel = True
-                                                    break
-                                        
-                                        if user_in_channel:
-                                            # User is still in the channel, kick them
-                                            nickname = self.client_map.get(clid, {}).get('nickname', 'Unknown')
+                                        # Time has passed, verify PKC is still active before kicking
+                                        if channel_id not in self.active_pkc_channels:
+                                            logger.debug(f"PKC: Kick cancelled for client {clid} - PKC no longer active for channel {channel_id}")
+                                            # Remove from pending kicks
+                                            if clid in self.pending_pkc_kicks:
+                                                del self.pending_pkc_kicks[clid]
+                                        else:
+                                            # PKC still active, check if user still in channel and kick
+                                            # Get current clientlist to verify user is still in the channel
+                                            clients = self.worker_conn.clientlist().parsed
+                                            user_in_channel = False
                                             
-                                            # Calculate remaining time for kick reason
-                                            if channel_id in self.active_pkc_channels:
+                                            for client in clients:
+                                                if str(client.get('clid', '')) == str(clid):
+                                                    if str(client.get('cid', '')) == str(channel_id):
+                                                        user_in_channel = True
+                                                        break
+                                            
+                                            if user_in_channel:
+                                                # User is still in the channel, kick them
+                                                nickname = self.client_map.get(clid, {}).get('nickname', 'Unknown')
+                                                
+                                                # Calculate remaining time for kick reason
                                                 end_time = self.active_pkc_channels[channel_id]['end_time']
                                                 remaining_seconds = max(0, int(end_time - time.time()))
                                                 remaining_minutes = remaining_seconds // 60
                                                 remaining_secs = remaining_seconds % 60
                                                 kick_reason = f"Channel lock for {remaining_minutes}:{remaining_secs:02d} minutes"
+                                                
+                                                # Kick the user
+                                                self.worker_conn.clientkick(reasonid=5, clid=clid, reasonmsg=kick_reason)
+                                                logger.info(f"PKC: Kicked client {clid} ({nickname}) from channel {channel_id}: {kick_reason}")
+                                                
+                                                # Log to pkc.csv
+                                                try:
+                                                    log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                                                    pkc_log_path = os.path.join(log_dir, 'pkc.csv')
+                                                    
+                                                    file_exists = os.path.exists(pkc_log_path)
+                                                    
+                                                    with open(pkc_log_path, 'a', newline='', encoding='utf-8') as f:
+                                                        fieldnames = ['datetime', 'channel_id', 'clid', 'nickname']
+                                                        writer = csv.DictWriter(f, fieldnames=fieldnames)
+                                                        
+                                                        if not file_exists:
+                                                            writer.writeheader()
+                                                        
+                                                        writer.writerow({
+                                                            'datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                                            'channel_id': channel_id,
+                                                            'clid': clid,
+                                                            'nickname': nickname
+                                                        })
+                                                    
+                                                    logger.debug(f"PKC: Logged event kick to pkc.csv")
+                                                except Exception as log_error:
+                                                    logger.error(f"Error logging PKC kick to CSV: {log_error}")
                                             else:
-                                                kick_reason = "Channel is locked"
+                                                logger.debug(f"PKC: Client {clid} no longer in channel {channel_id}, kick cancelled")
                                             
-                                            # Kick the user
-                                            self.worker_conn.clientkick(reasonid=5, clid=clid, reasonmsg=kick_reason)
-                                            logger.info(f"PKC: Kicked client {clid} ({nickname}) from channel {channel_id}: {kick_reason}")
-                                            
-                                            # Log to pkc.csv
-                                            try:
-                                                log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                                                pkc_log_path = os.path.join(log_dir, 'pkc.csv')
-                                                
-                                                file_exists = os.path.exists(pkc_log_path)
-                                                
-                                                with open(pkc_log_path, 'a', newline='', encoding='utf-8') as f:
-                                                    fieldnames = ['datetime', 'channel_id', 'clid', 'nickname']
-                                                    writer = csv.DictWriter(f, fieldnames=fieldnames)
-                                                    
-                                                    if not file_exists:
-                                                        writer.writeheader()
-                                                    
-                                                    writer.writerow({
-                                                        'datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                                                        'channel_id': channel_id,
-                                                        'clid': clid,
-                                                        'nickname': nickname
-                                                    })
-                                                
-                                                logger.debug(f"PKC: Logged event kick to pkc.csv")
-                                            except Exception as log_error:
-                                                logger.error(f"Error logging PKC kick to CSV: {log_error}")
-                                        else:
-                                            logger.debug(f"PKC: Client {clid} no longer in channel {channel_id}, kick cancelled")
-                                        
-                                        # Remove from pending kicks
-                                        if clid in self.pending_pkc_kicks:
-                                            del self.pending_pkc_kicks[clid]
+                                            # Remove from pending kicks
+                                            if clid in self.pending_pkc_kicks:
+                                                del self.pending_pkc_kicks[clid]
                                 
                             except Exception as kick_error:
                                 error_str = str(kick_error).lower()
