@@ -1120,6 +1120,20 @@ def process_command(bot, msg, nickname, clid=None):
         # Get list of all channels with their IDs
         if msg.startswith("!channelids"):
             return "\n" + get_channel_list()
+        if msg.startswith("!pkclogs"):
+            try:
+                # Parse optional search term: !pkclogs <nickname/clid>
+                parts = msg.split(maxsplit=1)
+                
+                if len(parts) > 1:
+                    search_term = parts[1].strip()
+                    return "\n" + get_pkc_logs(search_term=search_term)
+                else:
+                    return "\n" + get_pkc_logs()
+                    
+            except Exception as e:
+                logger.error(f"Error in !pkclogs command: {e}")
+                return f"\n[color=#FF0000]Error: {str(e)}[/color]"
         
         # Periodic kick channel command
         if msg.startswith("!pkc"):
@@ -1172,9 +1186,9 @@ def process_command(bot, msg, nickname, clid=None):
                     'duration_minutes': duration_minutes,
                     'started': datetime.now()
                 }
-                    
+                        
                     # Start thread
-                    thread.start()
+                thread.start()
                 
                 return f"\n[b][color=#4ECDC4]🔒 Channel {channel_id} locked for {duration_minutes} minutes.[/color][/b]\n[color=#A0A0A0]Active monitors: {len(bot.active_pkc_channels)}/3[/color]"
                     
@@ -1207,21 +1221,7 @@ def process_command(bot, msg, nickname, clid=None):
                 return f"\n[color=#FF0000]Error: {str(e)}[/color]"
         
         # Get PKC event kick logs
-        if msg.startswith("!pkclogs"):
-            try:
-                # Parse optional search term: !pkclogs <nickname/clid>
-                parts = msg.split(maxsplit=1)
-                
-                if len(parts) > 1:
-                    search_term = parts[1].strip()
-                    return "\n" + get_pkc_logs(search_term=search_term)
-                else:
-                    return "\n" + get_pkc_logs()
-                    
-            except Exception as e:
-                logger.error(f"Error in !pkclogs command: {e}")
-                return f"\n[color=#FF0000]Error: {str(e)}[/color]"
-        
+       
         # Get registered users count
         if msg.startswith("!registered"):
             return "\n" + get_registered_count()
