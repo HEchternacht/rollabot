@@ -1052,8 +1052,12 @@ def search_activity_log(search_term: str, max_results: int = 50):
             return "[color=#FF6B6B]Activity log not found. No events have been logged yet.[/color]"
         
         # First, try to find UID from nickname or IP in both reference sources
+        # Priority: exact match > case-insensitive match > partial match
         target_uids = set()
         matched_user_info = {}  # uid -> (nickname, ip)
+        
+        # Collect all rows from both sources first
+        all_rows = []
         
         # Check clients_reference.csv first (more up-to-date)
         if os.path.exists(clients_ref_path):
@@ -1063,13 +1067,7 @@ def search_activity_log(search_term: str, max_results: int = 50):
                     uid = row.get('uid', '')
                     nickname = row.get('nickname', '')
                     ip = row.get('ip', '')
-                    
-                    # Check if search term matches UID, nickname, or IP (case-insensitive)
-                    if (search_term.lower() in uid.lower() or
-                        search_term.lower() in nickname.lower() or
-                        search_term in ip):
-                        target_uids.add(uid)
-                        matched_user_info[uid] = (nickname, ip)
+                    all_rows.append(('clients_ref', uid, nickname, ip))
         
         # Also check users_seen.csv for historical data
         if os.path.exists(users_seen_path):
@@ -1079,14 +1077,31 @@ def search_activity_log(search_term: str, max_results: int = 50):
                     uid = row.get('UID', '')
                     nickname = row.get('NICKNAME', '')
                     ip = row.get('IP', '')
-                    
-                    # Check if search term matches UID, nickname, or IP
-                    if (search_term.lower() in uid.lower() or
-                        search_term.lower() in nickname.lower() or
-                        search_term in ip):
-                        target_uids.add(uid)
-                        if uid not in matched_user_info:
-                            matched_user_info[uid] = (nickname, ip)
+                    all_rows.append(('users_seen', uid, nickname, ip))
+        
+        # Pass 1: Exact case-sensitive match
+        for source, uid, nickname, ip in all_rows:
+            if search_term == uid or search_term == nickname or search_term == ip:
+                target_uids.add(uid)
+                matched_user_info[uid] = (nickname, ip)
+        
+        # Pass 2: Case-insensitive exact match (only if no exact match found)
+        if not target_uids:
+            for source, uid, nickname, ip in all_rows:
+                if (search_term.lower() == uid.lower() or 
+                    search_term.lower() == nickname.lower() or 
+                    search_term.lower() == ip.lower()):
+                    target_uids.add(uid)
+                    matched_user_info[uid] = (nickname, ip)
+        
+        # Pass 3: Partial substring match (only if no exact match found)
+        if not target_uids:
+            for source, uid, nickname, ip in all_rows:
+                if (search_term.lower() in uid.lower() or
+                    search_term.lower() in nickname.lower() or
+                    search_term in ip):
+                    target_uids.add(uid)
+                    matched_user_info[uid] = (nickname, ip)
         
         if not target_uids:
             # Last resort: assume search_term is a UID directly
