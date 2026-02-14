@@ -637,14 +637,45 @@ class TS3Bot:
             return {'success': False, 'kicked_count': 0, 'error': str(e)}
     
     def masspoke(self, msg):
-        """Poke all connected clients."""
-        clients = self.conn.clientlist().parsed
-        msg_chunks = self._split_poke_message(msg)
-        
-        for client in clients:
-            for chunk in msg_chunks:
-                msg=chunk if chunk.startswith("\n") else "\n"+chunk
-                self.conn.clientpoke(msg=msg, clid=client["clid"])
+        """Queue a masspoke operation to poke all connected clients."""
+        self.command_queue.put({
+            'type': 'masspoke',
+            'message': msg
+        })
+        logger.debug(f"Queued masspoke with message: {msg[:50]}...")
+    
+    def _do_masspoke(self, msg):
+        """Execute masspoke operation (called from worker thread)."""
+        try:
+            clients = self.worker_conn.clientlist().parsed
+            msg_chunks = self._split_poke_message(msg)
+            
+            poke_count = 0
+            for client in clients:
+                # Skip bot itself
+                client_type = client.get('client_type', '')
+                if client_type == '1':  # ServerQuery client (bot)
+                    continue
+                
+                clid = client.get('clid', '')
+                if clid:
+                    try:
+                        for chunk in msg_chunks:
+                            formatted_msg = chunk if chunk.startswith("\n") else "\n" + chunk
+                            self.worker_conn.clientpoke(msg=formatted_msg, clid=clid)
+                        poke_count += 1
+                    except Exception as poke_error:
+                        logger.warning(f"Failed to poke client {clid}: {poke_error}")
+            
+            logger.info(f"Masspoke completed: poked {poke_count} clients with {len(msg_chunks)} chunk(s)")
+            
+        except Exception as e:
+            error_str = str(e).lower()
+            if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
+                logger.warning(f"Connection error during masspoke: {e}")
+                self.worker_conn = None
+            else:
+                logger.error(f"Error executing masspoke: {e}")
     
     @timed
     def _fetch_and_log_clientlist(self, conn):
@@ -1827,6 +1858,17 @@ class TS3Bot:
                             
                             channels_str = ", ".join(cancelled_channels)
                             logger.info(f"PKC: Cancelled {cancelled_count} channel lock(s): {channels_str}")
+                    
+                    elif isinstance(item, dict) and item.get('type') == 'masspoke':
+                        # Execute masspoke operation
+                        message = item.get('message')
+                        if message:
+                            if not self.worker_conn or not self.worker_conn.is_connected():
+                                logger.warning("Worker connection not available, requeueing masspoke")
+                                self.command_queue.put(item)  # Requeue for later
+                            else:
+                                logger.debug("Processing masspoke operation")
+                                self._do_masspoke(message)
                     
                     process_time = (time.perf_counter() - process_start) * 1000
                     logger.debug(f"⏱️ Total item processing: {process_time:.2f}ms")

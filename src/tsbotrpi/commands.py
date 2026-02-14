@@ -1852,7 +1852,7 @@ def process_command(bot, msg, nickname, clid=None):
                 return "\n[color=#FF0000]Error retrieving logs.[/color]"
     except Exception as e:
         logger.error(f"Error processing command: {e}")
-        return "\n[color=#FF0000]QUEBREI: {e}.[/color]"
+        return f"\n[color=#FF0000]QUEBREI: {e}.[/color]"
     
     # Unknown command
 
