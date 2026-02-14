@@ -571,22 +571,77 @@ def get_recent_logs(minutes: int, max_results: int = 100):
 
 def get_registered_count():
     """
-    Get the number of users registered for exp notifications.
+    Get the list of users registered for exp notifications with their nicknames.
     
     Returns:
-        str: Count message or error
+        str: Formatted list of registered users or error
     """
     try:
         log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         registered_file = os.path.join(log_dir, 'registered.txt')
+        clients_ref_path = os.path.join(log_dir, 'clients_reference.csv')
+        uid_nicknames_path = os.path.join(log_dir, 'uid_nicknames.csv')
         
         if not os.path.exists(registered_file):
             return "[color=#FF6B6B]📋 No users registered for exp notifications.[/color]"
         
+        # Load registered UIDs
+        registered_uids = []
         with open(registered_file, 'r', encoding='utf-8') as f:
-            count = len([line for line in f if line.strip()])
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                # Parse format: "uid" or "uid,min_exp"
+                if ',' in line:
+                    uid = line.split(',', 1)[0]
+                else:
+                    uid = line
+                registered_uids.append(uid)
         
-        return f"[b][color=#4ECDC4]📋 Users registered for exp notifications:[/color][/b] [color=#FFD700]{count}[/color]"
+        if not registered_uids:
+            return "[color=#FF6B6B]📋 No users registered for exp notifications.[/color]"
+        
+        # Build UID to nickname mapping
+        uid_to_nickname = {}
+        
+        # Try uid_nicknames.csv first (historical data with all nicknames)
+        if os.path.exists(uid_nicknames_path):
+            with open(uid_nicknames_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    uid = row.get('UID', '').strip()
+                    nickname = row.get('NICKNAME', '').strip()
+                    if uid and nickname and uid not in uid_to_nickname:
+                        # Use first nickname found
+                        uid_to_nickname[uid] = nickname
+        
+        # Try clients_reference.csv (current data) to update/add missing
+        if os.path.exists(clients_ref_path):
+            with open(clients_ref_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    uid = row.get('uid', '').strip()
+                    nickname = row.get('nickname', '').strip()
+                    if uid and nickname:
+                        uid_to_nickname[uid] = nickname  # Override with current nickname
+        
+        # Format output
+        result = f"[b][color=#4ECDC4]📋 Users registered for exp notifications: {len(registered_uids)}[/color][/b]\n"
+        
+        # Get nicknames for registered users
+        nicknames = []
+        for uid in registered_uids:
+            nickname = uid_to_nickname.get(uid, uid[:12] + '...')  # Fallback to truncated UID
+            nicknames.append(nickname)
+        
+        # Sort alphabetically
+        nicknames.sort()
+        
+        # Display as comma-separated list
+        result += "[color=#FFD700]" + ",\n".join(nicknames) + "[/color]"
+        
+        return result
     except Exception as e:
         logger.error(f"Error getting registered count: {e}")
         return f"[color=#FF0000]Error: {str(e)}[/color]"
@@ -845,6 +900,136 @@ def periodic_kick_channel(bot, channel_id: str, duration_minutes: int, thread_id
         })
 
 
+def calculate_user_statistics(uid: str) -> dict:
+    """
+    Calculate comprehensive statistics for a user based on activity log.
+    
+    Args:
+        uid: User UID to calculate statistics for
+    
+    Returns:
+        dict: Statistics including time monitored, mute times, and channel times
+    """
+    try:
+        log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        readable_log_path = os.path.join(log_dir, 'activity_log_readable.csv')
+        
+        if not os.path.exists(readable_log_path):
+            return {}
+        
+        # Read all events for this user
+        user_events = []
+        with open(readable_log_path, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row.get('UID', '').strip() == uid:
+                    user_events.append(row)
+        
+        if not user_events:
+            return {}
+        
+        # Initialize tracking variables
+        current_channel = None
+        current_input_muted = False
+        current_output_muted = False
+        is_connected = False
+        
+        channel_times = {}  # channel -> total seconds
+        input_muted_time = 0
+        input_unmuted_time = 0
+        output_muted_time = 0
+        output_unmuted_time = 0
+        
+        last_timestamp = None
+        first_timestamp = None
+        
+        for event in user_events:
+            timestamp_str = event.get('TIMESTAMP', '')
+            event_desc = event.get('EVENT', '')
+            
+            try:
+                timestamp = datetime.strptime(timestamp_str, '%d/%m/%Y-%H:%M:%S')
+            except ValueError:
+                continue
+            
+            # Calculate time delta if we have a previous timestamp
+            if last_timestamp and is_connected:
+                time_delta = (timestamp - last_timestamp).total_seconds()
+                
+                # Add time to current channel
+                if current_channel:
+                    if current_channel not in channel_times:
+                        channel_times[current_channel] = 0
+                    channel_times[current_channel] += time_delta
+                
+                # Add time to mute status
+                if current_input_muted:
+                    input_muted_time += time_delta
+                else:
+                    input_unmuted_time += time_delta
+                
+                if current_output_muted:
+                    output_muted_time += time_delta
+                else:
+                    output_unmuted_time += time_delta
+            
+            # Update state based on event
+            if 'Connected to server' in event_desc:
+                is_connected = True
+                if first_timestamp is None:
+                    first_timestamp = timestamp
+            elif 'Disconnected' in event_desc:
+                is_connected = False
+                current_channel = None
+            elif 'Moved from' in event_desc and 'to' in event_desc:
+                # Extract destination channel
+                parts = event_desc.split(' to ')
+                if len(parts) == 2:
+                    current_channel = parts[1].strip()
+            elif 'Muted input microphone' in event_desc:
+                current_input_muted = True
+            elif 'Unmuted input microphone' in event_desc:
+                current_input_muted = False
+            elif 'Muted output speakers' in event_desc:
+                current_output_muted = True
+            elif 'Unmuted output speakers' in event_desc:
+                current_output_muted = False
+            
+            last_timestamp = timestamp
+        
+        # Calculate total time monitored
+        total_time = 0
+        if first_timestamp and last_timestamp:
+            total_time = (last_timestamp - first_timestamp).total_seconds()
+        
+        return {
+            'total_time': total_time,
+            'input_muted_time': input_muted_time,
+            'input_unmuted_time': input_unmuted_time,
+            'output_muted_time': output_muted_time,
+            'output_unmuted_time': output_unmuted_time,
+            'channel_times': channel_times
+        }
+    
+    except Exception as e:
+        logger.error(f"Error calculating user statistics: {e}")
+        return {}
+
+
+def format_time(seconds: float) -> str:
+    """Format seconds into human-readable time string."""
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    
+    if hours > 0:
+        return f"{hours}h:{minutes:02d}m"
+    else:
+        return f"{minutes}m"
+
+
 def search_activity_log(search_term: str, max_results: int = 50):
     """
     Search human-readable activity log for entries matching uid, nickname, or ip.
@@ -942,6 +1127,60 @@ def search_activity_log(search_term: str, max_results: int = 50):
         
         if total_found > max_results:
             result += f"\n[color=#A0A0A0](Showing last {max_results} of {total_found} total results)[/color]"
+        
+        # Add comprehensive statistics at the bottom
+        if len(target_uids) == 1:
+            uid = list(target_uids)[0]
+            stats = calculate_user_statistics(uid)
+            
+            if stats and stats.get('total_time', 0) > 0:
+                result += "\n\n[b][color=#4ECDC4]═══════════════════════════════[/color][/b]\n"
+                result += "[b][color=#FFD700]📊 USER STATISTICS[/color][/b]\n"
+                result += "[b][color=#4ECDC4]═══════════════════════════════[/color][/b]\n\n"
+                
+                # Total time monitored
+                total_time = stats['total_time']
+                result += f"[b][color=#90EE90]⏱️ Total Time Monitored:[/color][/b] [color=#FFFFFF]{format_time(total_time)}[/color]\n\n"
+                
+                # Input mute statistics
+                input_muted = stats['input_muted_time']
+                input_unmuted = stats['input_unmuted_time']
+                input_total = input_muted + input_unmuted
+                
+                if input_total > 0:
+                    result += "[b][color=#FF69B4]🎤 INPUT (Microphone):[/color][/b]\n"
+                    muted_pct = (input_muted / input_total) * 100
+                    unmuted_pct = (input_unmuted / input_total) * 100
+                    result += f"  [color=#FF6B6B]Muted:[/color] {format_time(input_muted)} [color=#A0A0A0]({muted_pct:.1f}%)[/color]\n"
+                    result += f"  [color=#00FF00]Unmuted:[/color] {format_time(input_unmuted)} [color=#A0A0A0]({unmuted_pct:.1f}%)[/color]\n\n"
+                
+                # Output mute statistics
+                output_muted = stats['output_muted_time']
+                output_unmuted = stats['output_unmuted_time']
+                output_total = output_muted + output_unmuted
+                
+                if output_total > 0:
+                    result += "[b][color=#4ECDC4]🔊 OUTPUT (Speakers):[/color][/b]\n"
+                    muted_pct = (output_muted / output_total) * 100
+                    unmuted_pct = (output_unmuted / output_total) * 100
+                    result += f"  [color=#FF6B6B]Muted:[/color] {format_time(output_muted)} [color=#A0A0A0]({muted_pct:.1f}%)[/color]\n"
+                    result += f"  [color=#00FF00]Unmuted:[/color] {format_time(output_unmuted)} [color=#A0A0A0]({unmuted_pct:.1f}%)[/color]\n\n"
+                
+                # Channel time statistics (sorted by time spent)
+                channel_times = stats.get('channel_times', {})
+                if channel_times:
+                    result += "[b][color=#FFD700]📍 TIME BY CHANNEL (Ordered by time spent):[/color][/b]\n"
+                    
+                    # Sort channels by time spent (descending)
+                    sorted_channels = sorted(channel_times.items(), key=lambda x: x[1], reverse=True)
+                    
+                    total_channel_time = sum(channel_times.values())
+                    
+                    for channel_name, time_spent in sorted_channels:
+                        percentage = (time_spent / total_channel_time) * 100 if total_channel_time > 0 else 0
+                        result += f"  [color=#4ECDC4]{channel_name}:[/color] {format_time(time_spent)} [color=#A0A0A0]({percentage:.1f}%)[/color]\n"
+                
+                result += "\n[b][color=#4ECDC4]═══════════════════════════════[/color][/b]"
         
         return result
         
