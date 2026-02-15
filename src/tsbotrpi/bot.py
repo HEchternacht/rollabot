@@ -517,9 +517,12 @@ class TS3Bot:
         if not xbot:
             return "x3tBot not found"
         
-        self.conn.sendtextmessage(
-            targetmode=1, target=xbot["clid"], msg=f"!hunted add {target}"
-        )
+        msg = f"!hunted add {target}"
+        msg_chunks = self._split_poke_message(msg, max_length=4096)
+        for chunk in msg_chunks:
+            self.conn.sendtextmessage(
+                targetmode=1, target=xbot["clid"], msg=chunk
+            )
         
         # Wait for responses
         for _ in range(10):
@@ -1569,10 +1572,13 @@ class TS3Bot:
                         
                         try:
                             send_start = time.perf_counter()
-                            self.worker_conn.sendtextmessage(targetmode=1, target=clid, msg=response)
+                            # Split response if longer than 4096 characters
+                            response_chunks = self._split_poke_message(response, max_length=4096)
+                            for chunk in response_chunks:
+                                self.worker_conn.sendtextmessage(targetmode=1, target=clid, msg=chunk)
                             send_time = (time.perf_counter() - send_start) * 1000
                             logger.debug(f"⏱️ Send response: {send_time:.2f}ms")
-                            logger.debug(f"Sent response to {nickname}")
+                            logger.debug(f"Sent response to {nickname} ({len(response_chunks)} chunk(s))")
                         except Exception as send_error:
                             error_str = str(send_error).lower()
                             if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
@@ -1617,8 +1623,11 @@ class TS3Bot:
                         message = item.get('message')
                         if clid and message:
                             try:
-                                self.worker_conn.sendtextmessage(targetmode=1, target=clid, msg=message)
-                                logger.debug(f"Sent delayed message to client {clid}")
+                                # Split message if longer than 4096 characters
+                                message_chunks = self._split_poke_message(message, max_length=4096)
+                                for chunk in message_chunks:
+                                    self.worker_conn.sendtextmessage(targetmode=1, target=clid, msg=chunk)
+                                logger.debug(f"Sent delayed message to client {clid} ({len(message_chunks)} chunk(s))")
                             except Exception as send_error:
                                 error_str = str(send_error).lower()
                                 if any(err in error_str for err in ['broken pipe', 'errno 32', 'connection', 'socket', 'not connected', '1794']):
