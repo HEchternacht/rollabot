@@ -1626,7 +1626,7 @@ class TS3Bot:
                                 # Split message if longer than 4096 characters
                                 message_chunks = self._split_poke_message(message, max_length=4096)
                                 for chunk in message_chunks:
-                                    self.worker_conn.sendtextmessage(targetmode=1, target=clid, msg=chunk)
+                                    self.worker_conn.sendtextmessage(targetmode=1, target=clid, msg="\n" + chunk if not chunk.startswith("\n") else chunk)
                                 logger.debug(f"Sent delayed message to client {clid} ({len(message_chunks)} chunk(s))")
                             except Exception as send_error:
                                 error_str = str(send_error).lower()
