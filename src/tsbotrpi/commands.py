@@ -553,8 +553,8 @@ def get_recent_logs(minutes: int, max_results: int = 100):
             uid = match.get('UID', '').strip()
             event = match.get('EVENT', 'unknown event')
             
-            # Get nickname from mapping, fallback to truncated UID
-            nickname = uid_to_nickname.get(uid, uid[:12] + '...')
+            # Get nickname from mapping, fallback to full UID
+            nickname = uid_to_nickname.get(uid, uid)
             
             result += f"[color=#FFD700]{i}.[/color] [color=#90EE90][{timestamp}][/color] [b]{nickname}[/b]\n"
             result += f"   [color=#FFFFFF]{event}[/color]\n\n"
@@ -632,7 +632,7 @@ def get_registered_count():
         # Get nicknames for registered users
         nicknames = []
         for uid in registered_uids:
-            nickname = uid_to_nickname.get(uid, uid[:12] + '...')  # Fallback to truncated UID
+            nickname = uid_to_nickname.get(uid, uid)  # Fallback to full UID
             nicknames.append(nickname)
         
         # Sort alphabetically
@@ -712,8 +712,8 @@ def get_users_list(plus_mode=False):
         result += "[color=#505050]" + "═" * 50 + "[/color]\n\n"
         
         for uid, nicknames in sorted(uid_nicknames.items()):
-            # Truncate UID for display
-            uid_display = uid[:12] + '...' if len(uid) > 12 else uid
+            # Show full UID
+            uid_display = uid
             nicks_list = ', '.join(sorted(nicknames))
             
             # Add nickname count if more than 1
@@ -1037,6 +1037,7 @@ def search_activity_log(search_term: str, max_results: int = 50):
     Args:
         search_term: The uid, nickname, or ip to search for
         max_results: Maximum number of results to return (default: 50, shows LAST entries)
+                    Use None or -1 to show ALL results
     
     Returns:
         str: Formatted results or error message
@@ -1121,8 +1122,11 @@ def search_activity_log(search_term: str, max_results: int = 50):
         if not all_matches:
             return f"\n[color=#FF6B6B]No activity found for: {search_term}[/color]"
         
-        # Take only the LAST max_results entries
-        matches = all_matches[-max_results:]
+        # Take only the LAST max_results entries (or all if max_results is None or -1)
+        if max_results is None or max_results == -1:
+            matches = all_matches
+        else:
+            matches = all_matches[-max_results:]
         total_found = len(all_matches)
         
         # Format results
@@ -1131,16 +1135,17 @@ def search_activity_log(search_term: str, max_results: int = 50):
             uid = list(target_uids)[0]
             if uid in matched_user_info:
                 nickname, ip = matched_user_info[uid]
-                user_display = f"{nickname} ({uid[:8]}...)"
+                user_display = f"{nickname} ({uid})"
         
-        result = f"[b][color=#4ECDC4]🔍 Found {total_found} activities for '[/color][color=#FFD700]{user_display}[/color][color=#4ECDC4]'[/color][/b] [color=#A0A0A0](showing last {len(matches)})[/color]\n\n"
+        showing_text = "showing all" if (max_results is None or max_results == -1) else f"showing last {len(matches)}"
+        result = f"[b][color=#4ECDC4]🔍 Found {total_found} activities for '[/color][color=#FFD700]{user_display}[/color][color=#4ECDC4]'[/color][/b] [color=#A0A0A0]({showing_text})[/color]\n\n"
         for i, match in enumerate(matches, 1):
             timestamp = match.get('TIMESTAMP', '')
             event = match.get('EVENT', 'unknown event')
             
             result += f"[color=#FFD700]{i}.[/color] [color=#90EE90][{timestamp}][/color] {event}\n"
         
-        if total_found > max_results:
+        if max_results and max_results != -1 and total_found > max_results:
             result += f"\n[color=#A0A0A0](Showing last {max_results} of {total_found} total results)[/color]"
         
         # Add comprehensive statistics at the bottom
@@ -1292,7 +1297,7 @@ def process_command(bot, msg, nickname, clid=None):
                 "[b][color=#FF1493]═════════════════════════════════════[/color][/b]\n\n"
                 "[b][color=#FF4500]!help[/color][/b] - Show this message\n"
                 "[b][color=#FF8C00]!mp[/color][/b] [color=#A0A0A0]<message>[/color] - Poke everyone (useful if x3tbot is offline)\n"
-                "[b][color=#FFD700]!logger[/color][/b] [color=#A0A0A0]<uid/nickname/ip>[/color] - Search activity log for user\n"
+                "[b][color=#FFD700]!logger[/color][/b] [color=#A0A0A0]<uid/nickname/ip> [all][/color] - Search activity log for user (use 'all' for all entries)\n"
                 "[b][color=#9ACD32]!lastminuteslogs[/color][/b] [color=#A0A0A0]<minutes>[/color] - Get activity from last N minutes\n"
                 "[b][color=#32CD32]!users[/color][/b] - List all UIDs with their associated nicknames\n"
                 "[b][color=#228B22]!users plus[/color][/b] - List only users with multiple nicknames\n"
@@ -1341,10 +1346,22 @@ def process_command(bot, msg, nickname, clid=None):
         
         # Search activity log
         if msg.startswith("!logger"):
-            search_term = msg[7:].strip()
-            if not search_term:
-                return "\n[color=#FF6B6B]Usage:[/color] [b]!logger[/b] [color=#A0A0A0]<uid/nickname/ip>[/color]"
-            return "\n" + search_activity_log(search_term)
+            args = msg[7:].strip()
+            if not args:
+                return "\n[color=#FF6B6B]Usage:[/color] [b]!logger[/b] [color=#A0A0A0]<uid/nickname/ip> [all][/color]\n[color=#90EE90]Example:[/color] !logger john  (shows last 50)\n[color=#90EE90]Example:[/color] !logger john all  (shows all entries)"
+            
+            # Check if "all" is in the arguments
+            parts = args.split()
+            show_all = False
+            if len(parts) > 1 and parts[-1].lower() == "all":
+                show_all = True
+                search_term = " ".join(parts[:-1])
+            else:
+                search_term = args
+            
+            # Call with max_results=None to show all, or default 50
+            max_results = None if show_all else 50
+            return "\n" + search_activity_log(search_term, max_results=max_results)
         
         # Get recent logs by minutes
         if msg.startswith("!lastminuteslogs"):
