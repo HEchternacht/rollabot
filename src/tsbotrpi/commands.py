@@ -1312,7 +1312,7 @@ def bdsm_text_async(nickname, bot, clid):
                     "Authorization": f"Bearer {set_key}",
                     "Content-Type": "application/json",
                 },
-                ddata=json.dumps({
+                data=json.dumps({
                         "model": "liquid/lfm-2.5-1.2b-instruct:free",
                         "messages": [
                             {"role": "system", "content": "Você é um escritor de contos eróticos e romanticos, pesquise na internet por contos ja criados e use como inspiração, tente ser o maximo explicito, você deve escrever somente o conto, não use frases como 'posso te ajudar em algo mais', no final do texto"},
