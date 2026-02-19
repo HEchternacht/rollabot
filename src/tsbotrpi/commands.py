@@ -1209,6 +1209,92 @@ def search_activity_log(search_term: str, max_results: int = 50):
         return f"\n[color=#FF0000]Error searching log: {str(e)}[/color]"
 
 
+def search_exp_log(search_term: str, max_results: int = 50):
+    """
+    Search exp deltas log for entries matching a player name.
+    
+    Args:
+        search_term: The name to search for
+        max_results: Maximum number of results to return (default: 50, shows LAST entries)
+                    Use None or -1 to show ALL results
+    
+    Returns:
+        str: Formatted results or error message
+    """
+    try:
+        # Get log file path (in project root)
+        log_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        exp_deltas_file = os.path.join(log_dir, 'exp_deltas.csv')
+        
+        if not os.path.exists(exp_deltas_file):
+            return "[color=#FF6B6B]No exp deltas log found.[/color]"
+        
+        # Read all rows and search for matching names
+        # Priority: exact match > case-insensitive match > partial match
+        all_rows = []
+        with open(exp_deltas_file, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                all_rows.append(row)
+        
+        if not all_rows:
+            return "[color=#FF6B6B]No exp deltas available.[/color]"
+        
+        # Pass 1: Exact case-sensitive match
+        exact_matches = []
+        for row in all_rows:
+            name = row.get('name', '')
+            if search_term == name:
+                exact_matches.append(row)
+        
+        # Pass 2: Case-insensitive exact match (only if no exact match found)
+        if not exact_matches:
+            for row in all_rows:
+                name = row.get('name', '')
+                if search_term.lower() == name.lower():
+                    exact_matches.append(row)
+        
+        # Pass 3: Partial substring match (only if no exact match found)
+        if not exact_matches:
+            for row in all_rows:
+                name = row.get('name', '')
+                if search_term.lower() in name.lower():
+                    exact_matches.append(row)
+        
+        if not exact_matches:
+            return f"\n[color=#FF6B6B]No exp deltas found for: {search_term}[/color]"
+        
+        # Take only the LAST max_results entries (or all if max_results is None or -1)
+        if max_results is None or max_results == -1:
+            matches = exact_matches
+        else:
+            matches = exact_matches[-max_results:]
+        total_found = len(exact_matches)
+        
+        # Calculate total exp
+        total_exp = sum(int(row.get('exp', 0)) for row in exact_matches)
+        
+        # Format results
+        showing_text = "showing all" if (max_results is None or max_results == -1) else f"showing last {len(matches)}"
+        result = f"[b][color=#4ECDC4]🔍 Found {total_found} exp gains for '[/color][color=#FFD700]{search_term}[/color][color=#4ECDC4]'[/color][/b] [color=#A0A0A0]({showing_text})[/color]\n"
+        result += f"[b][color=#90EE90]Total Exp:[/color][/b] [color=#00FF00]{total_exp:,}[/color]\n\n"
+        
+        # Show entries in reverse order (newest first)
+        for i, match in enumerate(reversed(matches), 1):
+            timedate = match.get('timedate', 'Unknown')
+            name = match.get('name', 'Unknown')
+            exp = match.get('exp', '0')
+            
+            result += f"[color=#FFD700]{i}.[/color] [color=#A0A0A0]{timedate}[/color] [color=#4ECDC4]{name}[/color] [color=#00FF00]{exp}[/color]\n"
+        
+        if max_results and max_results != -1 and total_found > max_results:
+            result += f"\n[color=#A0A0A0](Showing last {max_results} of {total_found} total results)[/color]"
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error searching exp log: {e}")
+        return f"\n[color=#FF0000]Error searching exp log: {str(e)}[/color]"
 
 
 def bdsm_text_async(nickname, bot, clid):
@@ -1226,15 +1312,17 @@ def bdsm_text_async(nickname, bot, clid):
                     "Authorization": f"Bearer {set_key}",
                     "Content-Type": "application/json",
                 },
-                data=json.dumps({
-                    "model": "liquid/lfm-2.5-1.2b-instruct:free",
-                    "messages": [
+                ddata=json.dumps({
+                        "model": "liquid/lfm-2.5-1.2b-instruct:free",
+                        "messages": [
+                            {"role": "system", "content": "Você é um escritor de contos eróticos e romanticos, pesquise na internet por contos ja criados e use como inspiração, tente ser o maximo explicito, você deve escrever somente o conto, não use frases como 'posso te ajudar em algo mais', no final do texto"},
                         {
+                            
                             "role": "user",
                             "content": f"escreva uma historia e poetico de romance e erotismo com MUITA sexualização entre voce e um usuario que quer você romanticamente, o nome desse usuario é {nickname}, durante a historia crie apelidos caridosos para ele, derivaçoes do nome dele, crie momentos de tensão e use palavras chulas como 'Foder', 'Socar', 'Meter' e outras de conotação sexual:, de forma erotica,sem pre-amble ou post-amble, apenas a hsitoria raw escreva a historia para o usuario, entao se refira a pessoa como 'Você, {nickname}' por exemplo, 'Você, {nickname}, é tão gostoso que eu quero te foder' ou 'Eu quero meter meu pau em você, {nickname}' ou 'Eu quero socar minha buceta em você, e variaçoes, termine com a frase, 'Eu.... Te amo {nickname}, me da seu cuzinho?"
                         }
-                    ]
-                }),
+                        ]
+                    }),
                 timeout=30
             )
             
@@ -1309,6 +1397,7 @@ def process_command(bot, msg, nickname, clid=None):
                 "[b][color=#9932CC]!warexp[/color][/b] - Show war statistics (Shell vs Ascended)\n"
                 "[b][color=#FF1493]!warexplog [days][/color][/b] - Show war exp history (default: 30 days)\n"
                 "[b][color=#FF4500]!explog [minutes][/color][/b] - Show recent exp gains (default: 100 entries)\n"
+                "[b][color=#FF6347]!explogger[/color][/b] [color=#A0A0A0]<name> [all][/color] - Search exp gains by player name (use 'all' for all entries)\n"
                 "[b][color=#FF8C00]!showlogs[/color][/b] - Show last 100 warnings/errors\n"
                 "[b][color=#FFD700]!bdsm[/color][/b] - Move you and the bot to Djinns channel\n"
                 "[b][color=#DC143C]!pkc[/color][/b] [color=#A0A0A0]<channel> <minutes> <password>[/color] - Lock channel (max 3 active)\n"
@@ -1756,6 +1845,25 @@ def process_command(bot, msg, nickname, clid=None):
             except Exception as e:
                 logger.error(f"Error in explog command: {e}")
                 return "\n[color=#FF0000]Error retrieving exp log.[/color]"
+        
+        # Search exp deltas by name
+        if msg.startswith("!explogger"):
+            args = msg[10:].strip()
+            if not args:
+                return "\n[color=#FF6B6B]Usage:[/color] [b]!explogger[/b] [color=#A0A0A0]<name> [all][/color]\n[color=#90EE90]Example:[/color] !explogger john  (shows last 50)\n[color=#90EE90]Example:[/color] !explogger john all  (shows all entries)"
+            
+            # Check if "all" is in the arguments
+            parts = args.split()
+            show_all = False
+            if len(parts) > 1 and parts[-1].lower() == "all":
+                show_all = True
+                search_term = " ".join(parts[:-1])
+            else:
+                search_term = args
+            
+            # Call with max_results=None to show all, or default 50
+            max_results = None if show_all else 50
+            return "\n" + search_exp_log(search_term, max_results=max_results)
         
         # Go home command - move user and bot to Djinns channel
         if msg.startswith("!bdsm"):
