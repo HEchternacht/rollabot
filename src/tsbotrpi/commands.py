@@ -1827,6 +1827,24 @@ def process_command(bot, msg, nickname, clid=None):
                 return "\n[color=#FF0000]Error retrieving war statistics. Please try again.[/color]"
         
         # Exp deltas log command
+        if msg.startswith("!explogger"):
+            args = msg[10:].strip()
+            if not args:
+                return "\n[color=#FF6B6B]Usage:[/color] [b]!explogger[/b] [color=#A0A0A0]<name> [all][/color]\n[color=#90EE90]Example:[/color] !explogger john  (shows last 50)\n[color=#90EE90]Example:[/color] !explogger john all  (shows all entries)"
+            
+            # Check if "all" is in the arguments
+            parts = args.split()
+            show_all = False
+            if len(parts) > 1 and parts[-1].lower() == "all":
+                show_all = True
+                search_term = " ".join(parts[:-1])
+            else:
+                search_term = args
+            
+            # Call with max_results=None to show all, or default 50
+            max_results = None if show_all else 50
+            return "\n" + search_exp_log(search_term, max_results=max_results)
+        
         if msg.startswith("!explog"):
             try:
                 parts = msg.split()
@@ -1847,23 +1865,6 @@ def process_command(bot, msg, nickname, clid=None):
                 return "\n[color=#FF0000]Error retrieving exp log.[/color]"
         
         # Search exp deltas by name
-        if msg.startswith("!explogger"):
-            args = msg[10:].strip()
-            if not args:
-                return "\n[color=#FF6B6B]Usage:[/color] [b]!explogger[/b] [color=#A0A0A0]<name> [all][/color]\n[color=#90EE90]Example:[/color] !explogger john  (shows last 50)\n[color=#90EE90]Example:[/color] !explogger john all  (shows all entries)"
-            
-            # Check if "all" is in the arguments
-            parts = args.split()
-            show_all = False
-            if len(parts) > 1 and parts[-1].lower() == "all":
-                show_all = True
-                search_term = " ".join(parts[:-1])
-            else:
-                search_term = args
-            
-            # Call with max_results=None to show all, or default 50
-            max_results = None if show_all else 50
-            return "\n" + search_exp_log(search_term, max_results=max_results)
         
         # Go home command - move user and bot to Djinns channel
         if msg.startswith("!bdsm"):
