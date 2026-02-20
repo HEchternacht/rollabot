@@ -1246,11 +1246,21 @@ class TS3Bot:
         # Process each pending poke
         pokes_to_keep = deque()
         total_sent = 0
+        dropped_old = 0
         
         for poke_item in self.pending_pokes:
             message = poke_item['message']
             target_uids = poke_item['target_uids']
             timestamp = poke_item['timestamp']
+            
+            # Check if poke is older than 20 minutes (1200 seconds)
+            age_seconds = time.time() - timestamp
+            age_minutes = age_seconds / 60
+            if age_minutes > 20:
+                # Drop pokes older than 20 minutes
+                dropped_old += 1
+                logger.debug(f"Dropped old delta exp poke (age: {age_minutes:.1f}m) for {len(target_uids)} users")
+                continue
             
             # Split message into chunks if needed
             message_chunks = self._split_poke_message(message)
@@ -1295,13 +1305,15 @@ class TS3Bot:
             remaining_uids = target_uids - successfully_poked
             
             # Keep the poke in queue if there are remaining targets and it's not too old
-            age_hours = (time.time() - timestamp) / 3600
-            if remaining_uids and age_hours < 24:  # Keep for up to 24 hours
+            # Recalculate age in case processing took time
+            age_minutes = (time.time() - timestamp) / 60
+            if remaining_uids and age_minutes < 20:  # Keep for up to 20 minutes
                 poke_item['target_uids'] = remaining_uids
                 pokes_to_keep.append(poke_item)
                 logger.debug(f"Poke message kept in queue for {len(remaining_uids)} remaining targets")
-            elif age_hours >= 24:
-                logger.info(f"Dropped old poke message (age: {age_hours:.1f}h) for {len(remaining_uids)} users")
+            elif age_minutes >= 20:
+                dropped_old += 1
+                logger.debug(f"Dropped old delta exp poke (age: {age_minutes:.1f}m) for {len(remaining_uids)} users")
             
             # If connection broke, keep all remaining pokes and stop processing
             if connection_broken:
@@ -1317,8 +1329,14 @@ class TS3Bot:
         # Update pending pokes queue
         self.pending_pokes = pokes_to_keep
         
-        if total_sent > 0:
-            logger.info(f"Sent {total_sent} pending poke notifications ({len(self.pending_pokes)} pokes still queued)")
+        if total_sent > 0 or dropped_old > 0:
+            log_parts = []
+            if total_sent > 0:
+                log_parts.append(f"sent {total_sent} pending poke notifications")
+            if dropped_old > 0:
+                log_parts.append(f"dropped {dropped_old} old pokes (>20min)")
+            log_parts.append(f"{len(self.pending_pokes)} pokes still queued")
+            logger.info(f"Poke processing: {', '.join(log_parts)}")
     
     @timed
     def _update_client_map(self, clid: str, data: dict):
