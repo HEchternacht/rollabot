@@ -469,9 +469,19 @@ class TS3Bot:
                     return
                 except Exception as e:
                     logger.error("Reconnection attempt %d failed: %s", attempt, e)
+                    
                     if attempt < 3:
                         logger.info("Waiting 20s before next attempt...")
                         time.sleep(5)
+                    else:
+                        #restart ts pid
+                            if self.process_manager:
+                                logger.warning("All reconnection attempts failed, restarting TS client")
+                                restarted = self.process_manager.restart()
+                                if restarted:
+                                    logger.info("TS client restarted successfully")
+                                else:
+                                    logger.warning("TS client restart skipped due to cooldown")
                 
                 
             # All reconnection attempts failed
