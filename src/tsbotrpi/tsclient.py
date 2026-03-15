@@ -200,6 +200,51 @@ class TSClientManager:
             os.remove(self.pid_file)
         self.terminal_pid = None
 
+    def force_kill(self):
+        """Force kill TS client process by PID, bypassing graceful shutdown."""
+        pid = self._read_pid()
+        if not pid:
+            # Try finding the process by name
+            pid = self._find_ts_process()
+
+        if not pid:
+            logger.warning("No TS client PID found to force kill")
+            return False
+
+        logger.warning("Force killing TS client (PID %s)", pid)
+
+        if psutil:
+            try:
+                proc = psutil.Process(pid)
+                # Kill the entire process tree
+                children = proc.children(recursive=True)
+                for child in children:
+                    try:
+                        child.kill()
+                    except psutil.NoSuchProcess:
+                        pass
+                proc.kill()
+                proc.wait(timeout=5)
+                logger.info("TS client force killed successfully")
+            except psutil.NoSuchProcess:
+                logger.debug("Process already dead")
+            except Exception as e:
+                logger.error("Error force killing TS client: %s", e)
+        else:
+            try:
+                if os.name == 'nt':
+                    import subprocess as sp
+                    sp.run(['taskkill', '/F', '/PID', str(pid)], capture_output=True)
+                else:
+                    os.kill(pid, signal.SIGKILL)
+            except OSError as e:
+                logger.error("Error force killing PID %s: %s", pid, e)
+
+        if os.path.exists(self.pid_file):
+            os.remove(self.pid_file)
+        self.terminal_pid = None
+        return True
+
     def restart(self):
         """Restart TeamSpeak client (with 1 minute cooldown).
         

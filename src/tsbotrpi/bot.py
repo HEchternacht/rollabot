@@ -268,6 +268,9 @@ class TS3Bot:
         self.active_pkc_channels = {}  # Dict of channel_id -> {'thread': Thread, 'end_time': timestamp, 'thread_id': str}
         self.pending_pkc_kicks = {}  # Dict of clid -> {'channel_id': str, 'scheduled_time': float}
 
+        # Consecutive reconnection failure counter - force kill PID after 5
+        self._reconnect_fail_count = 0
+
     @timed
     def _ensure_server_connection(self, conn=None, conn_name="connection"):
         """Check if connected to server and reconnect if needed."""
@@ -448,9 +451,33 @@ class TS3Bot:
         )
 
     def _reconnect(self, error=None):
-        """Reconnect and start/restart TS client only if connection refused."""
+        """Reconnect and start/restart TS client only if connection refused.
+
+        After 5 consecutive failures, force kills the TS client PID and restarts.
+        """
         self.conn = None
-        
+
+        # After 5 consecutive failures, force kill the stuck PID
+        if self._reconnect_fail_count >= 5 and self.process_manager:
+            logger.warning(
+                "5 consecutive reconnection failures - force killing TS client PID"
+            )
+            self.process_manager.force_kill()
+            time.sleep(3)
+            self.process_manager.start()
+            self._reconnect_fail_count = 0
+            # Wait for TS client to boot (box64 takes ~60s)
+            logger.info("Waiting 60s for TS client to start after force kill...")
+            time.sleep(60)
+            try:
+                self.conn = self.setup_connection()
+                logger.info("Connected after force kill + restart")
+                return
+            except Exception as e:
+                logger.error("Still cannot connect after force kill: %s", e)
+                self._reconnect_fail_count += 1
+                return
+
         # Check if TS client process is running
         ts_is_running = False
         if self.process_manager:
@@ -458,7 +485,7 @@ class TS3Bot:
             if pid and self.process_manager._is_running(pid):
                 ts_is_running = True
                 logger.info("TS client process is running (PID %s), attempting reconnection", pid)
-        
+
         # If TS is running, try reconnecting multiple times before restarting
         if ts_is_running:
             for attempt in range(1, 4):  # 3 attempts
@@ -466,50 +493,55 @@ class TS3Bot:
                     logger.info("Reconnection attempt %d/3...", attempt)
                     self.conn = self.setup_connection()
                     logger.info("Reconnected successfully on attempt %d", attempt)
+                    self._reconnect_fail_count = 0
                     return
                 except Exception as e:
                     logger.error("Reconnection attempt %d failed: %s", attempt, e)
-                    
                     if attempt < 3:
-                        logger.info("Waiting 20s before next attempt...")
                         time.sleep(5)
-                    else:
-                        #restart ts pid
-                            if self.process_manager:
-                                logger.warning("All reconnection attempts failed, restarting TS client")
-                                restarted = self.process_manager.restart()
-                                if restarted:
-                                    logger.info("TS client restarted successfully")
-                                else:
-                                    logger.warning("TS client restart skipped due to cooldown")
-                
-                
-            # All reconnection attempts failed
-            logger.warning("All 3 reconnection attempts failed, will restart TS client")
-        
-        # Try to connect first (if TS wasn't running or reconnection attempts failed)
+
+            # All 3 attempts failed
+            self._reconnect_fail_count += 1
+            logger.warning(
+                "All 3 reconnection attempts failed (consecutive failures: %d/5)",
+                self._reconnect_fail_count
+            )
+            if self.process_manager:
+                restarted = self.process_manager.restart()
+                if restarted:
+                    logger.info("TS client restarted, waiting 60s...")
+                    time.sleep(60)
+                else:
+                    logger.warning("TS client restart skipped due to cooldown")
+                    time.sleep(5)
+            return
+
+        # TS not running - try to connect, then start if needed
         try:
             self.conn = self.setup_connection()
             logger.info("Reconnected successfully")
+            self._reconnect_fail_count = 0
             return
         except Exception as e:
-            logger.error("Connection failed: %s", e)
-            
-            # Only start/restart TS client if connection refused or address not found
+            self._reconnect_fail_count += 1
+            logger.error(
+                "Connection failed (consecutive failures: %d/5): %s",
+                self._reconnect_fail_count, e
+            )
+
             if self._is_connection_refused(e) and self.process_manager:
                 logger.warning("Connection refused/unavailable - restarting TS client")
                 restarted = self.process_manager.restart()
-                
-                # Wait longer if we actually restarted (box64 takes ~60s)
-                # Wait less if restart was skipped due to cooldown
                 wait_time = 60 if restarted else 5
                 logger.info("Waiting %ds for TS client...", wait_time)
-                
-                # Try connecting again
+                time.sleep(wait_time)
+
                 try:
                     self.conn = self.setup_connection()
                     logger.info("Connected after restarting TS client")
+                    self._reconnect_fail_count = 0
                 except Exception as e2:
+                    self._reconnect_fail_count += 1
                     logger.error("Still cannot connect: %s", e2)
        
 
