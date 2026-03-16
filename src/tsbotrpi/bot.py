@@ -900,9 +900,9 @@ class TS3Bot:
             # Make request
             api_start = time.perf_counter()
             response = None 
-            for attempt in range(1, 4):  # 3 attempts
+            for attempt in range(1, 7):  # 6 attempts
                 try:
-                    timeout = 2 ** attempt  # Exponential: 2, 4, 8 seconds
+                    timeout = 2 ** attempt  # Exponential: 2, 4, 8, 16, 32, 64 seconds
                     response = requests.get(base_url + url, timeout=timeout,verify=False)
                     if response.status_code == 200:
                         break
@@ -912,7 +912,7 @@ class TS3Bot:
                         logger.warning(f"Guild exp API returned status {response.status_code}")
                         return
                 except requests.RequestException as e:
-                    if attempt < 3:
+                    if attempt < 7:
                         logger.debug(f"Guild exp API request failed (attempt {attempt}/3): {e}")
                     else:
                         logger.warning(f"Guild exp API request failed after 3 attempts: {e}")
@@ -1665,9 +1665,9 @@ class TS3Bot:
                             self._do_send_pokes()
                     
                     elif isinstance(item, dict) and item.get('type') == 'guild_exp_check':
-                        # Guild exp check request
-                        logger.debug("Processing guild exp check")
-                        self._check_guild_exp()
+                        # Guild exp check - fire and forget (don't block worker loop)
+                        logger.debug("Processing guild exp check (fire-and-forget)")
+                        threading.Thread(target=self._check_guild_exp, daemon=True).start()
                     
                     elif isinstance(item, dict) and item.get('type') == 'move_to_djinns':
                         # Move to Djinns channel request
