@@ -457,11 +457,17 @@ class TS3Bot:
         """
         self.conn = None
 
-        # After 5 consecutive failures, force kill the stuck PID
+        # After 5 consecutive failures, force kill the stuck PID (catastrophic crash)
         if self._reconnect_fail_count >= 5 and self.process_manager:
             logger.warning(
-                "5 consecutive reconnection failures - force killing TS client PID"
+                "5 consecutive reconnection failures - CATASTROPHIC: force killing TS client PID"
             )
+            # Null all connections since the TS client process is dead
+            self.conn = None
+            self.event_conn = None
+            self.worker_conn = None
+            self.reference_conn = None
+
             self.process_manager.force_kill()
             time.sleep(3)
             self.process_manager.start()
@@ -2029,16 +2035,20 @@ class TS3Bot:
         try:
             while self._running:
                 # Reconnect main connection if needed
-                if  time.time() - last_conn_reconnect_time > 10:
+                # Exp backoff: 2,4,8,16,32s based on consecutive failures
+                reconnect_interval = min(2 ** (self._reconnect_fail_count + 1), 32) if self._reconnect_fail_count > 0 else 10
+                if  time.time() - last_conn_reconnect_time > reconnect_interval:
                     if self.conn is None or not self.conn.is_connected() :
                         try:
                             last_conn_reconnect_time = time.time()
-                            logger.info("Main connection not available, attempting to reconnect...")
-                            self.conn = self._reconnect()
-                            logger.info("Main connection re-established")
-                            # Queue pending pokes for sending after reconnection
-                            if self.pending_pokes:
-                                self.command_queue.put({'type': 'send_pokes'})
+                            logger.info("Main connection not available (failures: %d/5), reconnecting in %ds...",
+                                       self._reconnect_fail_count, reconnect_interval)
+                            self._reconnect()
+                            if self.conn and self.conn.is_connected():
+                                logger.info("Main connection re-established")
+                                # Queue pending pokes for sending after reconnection
+                                if self.pending_pokes:
+                                    self.command_queue.put({'type': 'send_pokes'})
                         except Exception as e:
                             logger.error(f"Failed to reconnect main connection: {e}")
                             last_conn_reconnect_time = time.time()
