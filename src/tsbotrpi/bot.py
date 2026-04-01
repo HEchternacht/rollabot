@@ -517,8 +517,16 @@ class TS3Bot:
             if self.process_manager:
                 restarted = self.process_manager.restart()
                 if restarted:
-                    logger.info("TS client restarted, waiting 60s...")
-                    time.sleep(60)
+                    logger.info("TS client restarted, polling for connection (up to 90s)...")
+                    for _ in range(18):  # poll every 5s for up to 90s
+                        time.sleep(5)
+                        try:
+                            self.conn = self.setup_connection()
+                            logger.info("Reconnected after restart")
+                            self._reconnect_fail_count = 0
+                            return
+                        except Exception:
+                            pass
                 else:
                     logger.warning("TS client restart skipped due to cooldown")
                     time.sleep(5)
@@ -540,17 +548,19 @@ class TS3Bot:
             if self._is_connection_refused(e) and self.process_manager:
                 logger.warning("Connection refused/unavailable - restarting TS client")
                 restarted = self.process_manager.restart()
-                wait_time = 60 if restarted else 5
-                logger.info("Waiting %ds for TS client...", wait_time)
-                time.sleep(wait_time)
-
-                try:
-                    self.conn = self.setup_connection()
-                    logger.info("Connected after restarting TS client")
-                    self._reconnect_fail_count = 0
-                except Exception as e2:
+                if restarted:
+                    logger.info("Polling for connection after restart (up to 90s)...")
+                    for _ in range(18):  # poll every 5s for up to 90s
+                        time.sleep(5)
+                        try:
+                            self.conn = self.setup_connection()
+                            logger.info("Connected after restarting TS client")
+                            self._reconnect_fail_count = 0
+                            return
+                        except Exception:
+                            pass
                     self._reconnect_fail_count += 1
-                    logger.error("Still cannot connect: %s", e2)
+                    logger.error("Still cannot connect after restart + 90s")
        
 
     def get_xbot(self):
