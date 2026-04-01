@@ -457,8 +457,8 @@ class TS3Bot:
         """
         self.conn = None
 
-        # After 5 consecutive failures, force kill the stuck PID (catastrophic crash)
-        if self._reconnect_fail_count >= 5 and self.process_manager:
+        # After 2 consecutive failures, force kill the stuck PID (catastrophic crash)
+        if self._reconnect_fail_count >= 2 and self.process_manager:
             logger.warning(
                 "5 consecutive reconnection failures - CATASTROPHIC: force killing TS client PID"
             )
@@ -473,16 +473,18 @@ class TS3Bot:
             self.process_manager.start()
             self._reconnect_fail_count = 0
             # Wait for TS client to boot (box64 takes ~60s)
-            logger.info("Waiting 60s for TS client to start after force kill...")
-            time.sleep(60)
-            try:
-                self.conn = self.setup_connection()
-                logger.info("Connected after force kill + restart")
-                return
-            except Exception as e:
-                logger.error("Still cannot connect after force kill: %s", e)
-                self._reconnect_fail_count += 1
-                return
+            logger.info("Waiting for TS client to start after force kill (up to 90s)...")
+            for _ in range(18):  # poll every 5s for up to 90s
+                time.sleep(5)
+                try:
+                    self.conn = self.setup_connection()
+                    logger.info("Connected after force kill + restart")
+                    return
+                except Exception:
+                    pass
+            logger.error("Still cannot connect after force kill + 90s")
+            self._reconnect_fail_count += 1
+            return
 
         # Check if TS client process is running
         ts_is_running = False
@@ -504,12 +506,12 @@ class TS3Bot:
                 except Exception as e:
                     logger.error("Reconnection attempt %d failed: %s", attempt, e)
                     if attempt < 3:
-                        time.sleep(5)
+                        time.sleep(2)
 
             # All 3 attempts failed
             self._reconnect_fail_count += 1
             logger.warning(
-                "All 3 reconnection attempts failed (consecutive failures: %d/5)",
+                "All 3 reconnection attempts failed (consecutive failures: %d/2)",
                 self._reconnect_fail_count
             )
             if self.process_manager:
@@ -531,7 +533,7 @@ class TS3Bot:
         except Exception as e:
             self._reconnect_fail_count += 1
             logger.error(
-                "Connection failed (consecutive failures: %d/5): %s",
+                "Connection failed (consecutive failures: %d/2): %s",
                 self._reconnect_fail_count, e
             )
 
@@ -2041,7 +2043,7 @@ class TS3Bot:
                     if self.conn is None or not self.conn.is_connected() :
                         try:
                             last_conn_reconnect_time = time.time()
-                            logger.info("Main connection not available (failures: %d/5), reconnecting in %ds...",
+                            logger.info("Main connection not available (failures: %d/2), reconnecting in %ds...",
                                        self._reconnect_fail_count, reconnect_interval)
                             self._reconnect()
                             if self.conn and self.conn.is_connected():
